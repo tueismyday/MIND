@@ -1,0 +1,482 @@
+Overskrift: Aktuel indlæggelse
+
+I dette afsnit skal du besvare punkterne med den nyeste og mest RELEVANTE patientinformation medmindre andet er angivet.
+
+Sub_section: Årsag til aktuel indlæggelse
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Læge, Overlæge, Medicinstuderende]
+
+
+
+- Hvad er årsagen til at patienten er indlagt?
+-- Brug eventuelt fysio-, samt ergoterapeut anamnesen
+-- Benævn kun de vigtigste faktorer der er skyld i patienten er blevet indlagt
+--- Brug indlæggelsesnotatet
+--- Skriv IKKE noget om patientens medicin, medicin hører til i andre sektioner
+--- Skriv IKKE noget om nuværende eller seneste status, kun om årsagen til at patienten blev indlagt.
+
+Sub_section: Smitterisiko
+
+[NOTE_TYPES: ALL]
+
+- Hvis der har været positiv for dyrkning (COVID/ INFLUENZA m.m.) Skriv dato for positiv dyrkning, hvornår må 
+patienten af isoleres og hvilke isolationsregime der er brugt på afdeling G (geatrisk afdeling)
+
+- Hvis patienten ikke har haft en positiv dyrkning, skal dette skrives, og at patienten ikke har 
+været isoleret.
+
+Sub_section: Forventet indlæggelsesforløb
+
+[NOTE_TYPES: Læge, Overlæge, Medicinstuderende]
+
+- Se indlæggelsesnotat og første stuegang, og beskriv kort de forventede tiltag der skal foretages imens 
+patienten er indlagt på afdelingen, samt hvornår patienten forventes udskrevet ifølge
+patientinformationen.
+- Du skal ikke skrive forhold omkring patientens udskrivelse og heller ikke omkring opfølgning efter patienten er udskrevet
+- Du skal ikke skrive patientens årsag til indlæggelse
+-- HUSK ifølge sundhedsloven må vi KUN videregive information som er relevant for 
+primærsektoren at vide.
+--- Det vil sige, du ikke skal tilføje yderligere information om patienten i dette afsnit.
+
+
+Overskrift: Yderligere koordinering
+
+[NOTE_TYPES: ALL]
+
+I dette afsnit skal du bruge den nyeste patientinformation til at besvare spørgsmål omkring 
+behov for yderligere koordinering med kommunen.
+Du skal ALTID bruge følgende format:
+Ja/Nej – tekst
+hvor tekst er en kort forklaring på hvorfor ja eller nej med referencer til patientinformationen
+i teksten skal der IKKE stå, hvad der ikke er dokumenteret.
+
+Sub_section: Boligændringer forventes
+
+[NOTE_TYPES: ALL]
+
+- Forventes der at der skal være ændringer i patientens bolig?
+-- Hvis ja: skriv hvilke ændringer der skal foretages 
+--- Boligændringer er ikke om borger skal skifte bolig, men om der eks. skal fjernes dørtrin, eller gøre opmærksom på udfordringer med flere etager. 
+--- Du må ikke selv lave en vurdering, det skal stå i patientjournalen at der skal laves ændringer i boligen og hvorfor
+-- Hvis der ikke forventes boligændringer: skriv at der ikke forventes boligændringer.
+
+Sub_section: Hjælpemidler aftales
+
+[NOTE_TYPES: Ergoterapeut, Fysioterapeut, Sygeplejerske, Sygeplejestuderende]
+
+- Skal patienten have hjælpemidler med hjem eller til udlån ved kommunen?
+-- Hvis ja: indsæt ergoterapeut notat om hjælpemidler, hvis nej - skriv blot at der ikke 
+medgives eller er behov for hjælpemidler eller redskaber.
+--- Her må du ikke skrive om ergoterepeutens vurdering af funktionsevne
+-- desuden skal du skrive hvilke har OUH udlånt – hvilke hjælpemidler mangler. Nævn om det er APV redskab.
+(APV-redskaber, er udstyr og redskaber, der bruges til at udføre et arbejde sikkerheds- og sundhedsmæssigt forsvarligt, primært i omsorgsarbejde eller med borgere med nedsat funktionsevne)
+-- Hvis nej: som tekst, skriv at der ikke er medgivet hjælpemidler eller redskaber, eller at der ikke er behov.
+
+Sub_section: Behov for genoptræning
+
+[NOTE_TYPES: Ergoterapeut, Fysioterapeut]
+
+- Får patienten behov for genoptræning efter udskrivelse fra afdelingen?
+-- Hvis ja: som tekst, skriv hvilken og hvad der er aftalt, lad vær med at forklare hvorfor. Husk at det skal stå i patientinformationen, - du må ikke finde på.
+-- Hvis nej: skriv at patienten vurderes til ikke at få behov for genoptræning
+--- Hvis hans funktionsniveau er habituel, skal der ikke foretages genoptræning.
+
+Sub_section: Behov for hjælp til hjemmesygepleje
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende]
+
+- Får patienten behov for at få besøg af hjemmesygeplejen efter udskrivelse fra afdelingen?
+-- Hvis ja: som tekst, specificér hvilke eller hvilken der er brug for hjælp til: Injektionsgivning, Sår pleje, Dauerbind, 
+SIK (Steril Intermitterende Kateterisation), RIK (Ren Intermitterende Kateterisation), kompresseion, KAD (blærekater), medicin dosering. Patienten har kun brug for hjælp til dette, hvis det er specifikt angivet i patientjournalen.
+-- Hvis nej: som tekst, skriv blot at der ikke er behov for hjemmesygepleje
+
+Sub_section: Behov for hjælp til medicin administration
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende]
+
+- Får patienten behov for at få hjælp til medicin dosering efter udskrivelse fra afdelingen?
+-- Hvis ja: som tekst, besvar følgende kort:
+--- Hvad er der behov for hjælp til: Tabletter, øjendråber, salve, injektion eller medicin 
+efter skema?
+---- Du må ikke nævne specifikt hvilken medicin og i hvilke doser
+-- Hvis nej: som tekst, skriv patienten ikke har brug for hjælp til medicin dosering.
+
+Sub_section: Behov for hjælp til medicinindtagelse
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Ergoterapeut]
+
+- Skal patienten ifølge patientinformationen have hjælp til medicinindtagelse? 
+-- Hvis ja: som tekst, svar på om patienten så have hjælp til: 
+--- At sætte medicin frem på rette tidspunkt?
+--- Skal det sikres at patienten indtager medicinen? Hvordan? 
+---- Hvordan skal den gives: Opslæmmes, knuses, med yoghurt, injektion, på ske, eller andet?
+-- Hvis nej: som tekst, skriv at patienten ikke har brug for hjælp til medicin dosering.
+
+Der kan findes information i Ergoterapeutens synkevurdering.
+
+Sub_section: Behov for anden kommunal indsats
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Ergoterapeut]
+
+- Får patienten behov for anden kommunal indsats efter udskrivelse fra afdelingen?
+-- Kan eksempelvis være: 
+--- Fysisk og verbal støtte i nedre hygiejne, grundet nedsat balance. 
+--- Sårpleje 
+--- Anretning af mad, grundet nedsat kognition. 
+--- Madordning 
+-- Hvis ja: som tekst, indsæt konklusion på ADL vurdering, hvis den findes i patientjournalen og skriv specifikke indsatser der er behov for. 
+-- Hvis nej: som tekst, nævn ikke de forskellige kommunale indsatser, blot at patienten ikke har brug for anden kommunal indsats.
+
+-- Skriv ikke noget om medicin, hvor meget patienten spiser eller om der er behov for fysioterapeutisk opfølgning efter udskrivelse
+
+- Har patienten ansøgt om en eller flere af følgende?
+-- Rengøring, Indkøb, Tøjvask
+--- Hvis ja: skriv hvilke
+--- Hvis nej: skriv at patienten ikke at søgt om hjælp til regøring, indkøb eller tøjvask.
+
+Sub_section: Behov for udskrivningskonference
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende]
+
+Hvis du ikke kan finde noget specifikt, skal du skrive:
+Behovet for udskrivningskonference er ikke angivet i patientjournalen.
+
+
+Overskrift: Sygepleje
+
+I dette afsnit skal du bruge de nyeste og mest relevante patientinformationer til at besvare spørgsmål omkring patientens sygeplejebehov.
+Du skal huske at følge alle instrukserne nøje og kun besvare det du bliver bedt om. Du skal ikke opremse alle emner som patienten ikke har problemer med eller som der ikke er dokumenteret i journalen.
+
+Sub_section: Bevægeapparat
+
+[NOTE_TYPES: Fysioterapeut, Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent]
+
+Patientens evne til at bevæge sig:
+- Er der forhold for patientens evne til at bevæge sig, som kan give udfordring? 
+-- Hvis ja: Beskriv kort disse udfordringer og brug altid fysioterapeut notat eller konklusion hvis den findes i patientjournalen.
+--- Du må ikke bruge ADL-vurderingen her
+--- Det er vigtigt at beskrive hvilke redskaber der skal bruges til forflytning, hvis det er nødvendigt for patienten med hjælp til forflytning
+
+Hvis nej til alle:
+Skriv: Patienten ikke har nogen problemer relateret til bevægeapperatet
+
+Sub_section: Ernæring
+
+[NOTE_TYPES: Diætist, Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Ergoterapeut]
+
+Skriv ikke noget om medicin.
+
+Indtag og behov for diætist, ernæringsrecept, eller sonde:
+- Har patienten et nedsat indtag, behov for diætist, ernæringsrecept, eller sonde?
+-- Hvis ja, så skal patientens vægt angives, og der skal angives hvor hyppigt der indtages mad. 
+-- Indsæt diætist sondeplan hvis den findes i patientjournalen 
+
+Nyopdaget diabetes:
+- Har patienten har nyeligt opdaget diabetes?
+-- Så skal du skrive der medsendes blodsukkerapperat
+
+Ernæringsvanskeligheder:
+- Har patienten dokumenteret har ernærings vanskeligheder?
+-- se ergoterapeut synkevurdering
+-- Hvad skal der holdes øje med, og står der beskrevet i patientinformation hvornår en læge 
+skal kontaktes hvis dette problem opstår?
+
+Remedier til ernæring:
+- Er der givet remedier med i forhold til ernæring, hvilke er givet med? 
+-- Find informationer omkring remedier til ernæring og indsæt
+ Har patienten problemer med væskeindtag? 
+-- Find og indsæt ergoterapeutens synkevurdering notat hvis den findes i patientjournalen 
+
+Madindtag:
+- Har patienten problemer ved madindtag? 
+-- Hvordan skal tabletter og piller anrettes?
+-- Blød kost eller almindelig?
+
+Hvis nej til alle:
+Skriv: Patienten ikke har nogen problemer relateret til ernæring
+
+Sub_section: Hud og slimhinder
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Læge, Overlæge, Medicinstuderende]
+
+Sårnotat:
+- Indsæt sårsygeplejerskens sårnotat hvis den findes i patientjournalen ellers skal du ikke skrive noget
+
+Plejekrævende sår/udslet:
+- Har patienten sår eller udslæt der kræver pleje?
+-- Hvis ja, beskriv sår/udslet og svar på følgende hvis relevant:
+--- Hvornår er plaster eller bandage skiftet, 
+--- Plan for videre brug af plaster eller bandage 
+--- Remedier der skal anvendes ved sårpleje
+
+Tryksår:
+- Er patienten tryksårstruet? 
+-- Hvis ja: skriv Placering af evt. sår og hvordan er pt. Aflastet. 
+-- Patienten er ikke tryksårstruet hvis de kan bevæge sig i sengen eller mere end det ved udskrivelse
+
+Hvis nej til alle:
+Skriv: Patienten ikke har nogen problemer relateret til hud og slimhinder
+
+Sub_section: Kommunikation
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Læge, Overlæge, Medicinstuderende]
+
+Kommunikationsudfordringer:
+- Har patienten kommunikationsudfordringer? 
+-- Hvis ja:
+--- Er der brug for: 
+---- Tolk, høreapparater, hear-it, talekort. 
+--- Har patienten følgende kommunikations-lidelser? 
+---- ekspressiv afasi, impressiv afasi, dysartri.
+
+Hvis nej til alle:
+Skriv: Patienten ikke har nogen problemer relateret til kommunikation.
+
+
+Sub_section: Psykosociale forhold
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent]
+
+Socialt sammenvær:
+- Har patienten nedsat evne til socialt sammenvær?
+-- beskriv meget kort med et eksempel, hvis du kan finde det i patientjournalen
+
+Emotionelle udfordringer:
+- Har patienten oplevet emotionelle problemer under indlæggelsen? 
+
+Misbrug:
+- Har patienten problemer med misbrug? 
+
+Mentale udfordringer:
+- Har patienten mentale problemer?
+-- Herunder tankeforstyrrelser, tvangstanker, selvdestruktiv adfærd, egenomsorgssvigt, 
+depression, demens, delirium, manglende impulskontrol
+
+Hvis nej til alle:
+Skriv: Patienten ikke har nogen problemer relateret til psykosociale forhold.
+
+Sub_section: Respiration og cirkulation
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Fysioterapeut, Læge, Overlæge, Medicinstuderende]
+
+Respirationsproblemer:
+- Har patienten respirationsproblemer? 
+-- Hvis ja, beskriv:
+--- Patientens vejrtrækningsfunktion
+--- Patientens hostefunktion
+--- Patientens ekspektorat ved hoste
+--- Indsæt eventuelt fysioterapeutens respirations vurdering hvis den findes i patientjournalen 
+
+Cirkulationsproblemer:
+- Har patienten cirkulationsproblemer? 
+-- Hvis ja, beskriv:
+--- Hudens udseende og følelse
+--- Om patienten er træt og svimmel
+-- Hvis nej, skriv blot at patienten ikke har respirationsproblemer.
+
+Kadielle og vaskulære problematikker:
+- Har patienten kardielle eller vaskulære problematikker?
+-- Hvis ja, beskriv:
+--- hvilke kardielle eller vaskulære problematikker der er tale om
+
+Handleplan:
+- Er der lavet en handleplaner under indlæggelsen?
+-- For eksempel om patienten skal bruge pep-fløjte, have kompressionsbehandling eller andet
+
+Hvis nej til alle:
+Skriv: Patienten ikke har nogen problemer relateret til Respiration og cirkulation
+
+Sub_section: Seksualitet
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent]
+
+Seksualitet:
+- Oplever patienten problemer med sin seksualitet?
+-- herunder nedsat, manglende eller øget seksuel lyst, erektionssvigt, impotens, 
+samlejesmerter, samlivsforstyrrelser. Udfordringer efter urinvejskateter anlæggelse
+
+Hvis nej:
+Skriv: Patienten ikke har nogen problemer relateret til sin seksualitet.
+
+Sub_section: Smerter og sanseindtryk
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Fysioterapeut, Ergoterapeut, Læge, Overlæge, Medicinstuderende]
+
+Smerter:
+- Oplever patienten smerter? 
+-- Hvis ja:
+--- Angiv Smerternes lokalitet, VAS-score, behov for pro necessitate (pn) medicin. 
+--- Beskriv hvordan smerten kommer til udtryk, styrke og udløsende faktorer.
+
+Synet:
+- Oplever patienten problemer med synssansen? 
+
+Hørelsen:
+- Oplever patienten problemer med hørelsen? 
+
+Smagssansen:
+- Oplever patienten problemer med smagssansen? 
+
+Følesansen:
+- Oplever patienten problemer med følesansen?
+
+Hvis nej til alle:
+Skriv: Patienten ikke har nogen problemer relateret til smerter og sanser.
+
+Sub_section: Søvn og hvile
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent]
+
+Døgnrytmeproblemer
+- Oplever patienten døgnrytmeproblemer?
+-- Hvis ja: beskriv hvilke
+--- beskriv årsag meget kort, uden overflødig information
+
+Søvnproblemer
+- Oplever patienten søvnproblemer? 
+-- Hvis ja: beskriv hvilke
+--- beskriv årsag meget kort, uden overflødig information
+
+Hvis nej til alle:
+Skriv: Patienten ikke har nogen problemer relateret til søvn og hvile.
+
+Sub_section: Viden og udvikling
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent]
+
+Hukommelsesudfordringer:
+- Har patienten hukommelsesudfordringer?
+
+Kognitiv støtte:
+- har patienten brug for verbal guidening for at forklare sig?
+
+Sygdomsindsigt
+- Har patienten tilstrækkelig Sygdomsindsigt? 
+-- Herunder:
+--- Har patienten manglende egenomsorgskapacitet?
+--- Ønsker patienten ikke den hjælp vi har vurderet nødvendig?
+--- Overvurderer patienten egne evner?
+
+Hvis patienten har tilstrækkelig Sygdomsindsigt skal dette blot skrives.
+
+Sub_section: Udskillelse af affaldsstoffer
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Læge, Overlæge, Medicinstuderende]
+
+SIK:
+- Har patienten brug for Steril intermitterende kateterisation? 
+-- Hvis ja:
+--- hvor længe/hyppigt/hvornår skal det seponeres?
+
+KAD:
+- Bruger patienten blærekateter (KAD)?
+-- Hvis ja:
+--- Hvilke remedier medgivet. Hvilken størrelse Ble bruger patienten. Hvilken Uridom 
+størrelse har patienten brug for? 
+
+Vandladning
+- Har patienten Problemer med vandladning?
+
+Mave og Tarm
+- Har patienten Problemer med mave og tarm?
+
+Seneste afføring
+Besvar: Hvornår har patienten senest haft afføring?
+- Brug de nyeste sygeplejenoter til denne information
+-- søg efter: Seneste afføring
+-- Angiv dato og bristol skala for afføring
+
+
+
+Overskrift: Funktionsevne
+
+Søg i patientjournalen og vurder kort og præcist patientens evne til ud fra fysiske status og på en skala ud fra 
+1-4 som følgende:
+0 = Ingen/ubetydelige begrænsninger: Patienten er selvstændig og har ikke behov for personassistance for at udføre aktiviteten 
+1 = Lette begrænsninger: Patienten er den aktive part og kan med let personassistance udføre aktiviteten. 
+2 = Moderate begrænsninger: Patienten er den aktive part og kan under forudsætning af moderat personassistance udføre 
+aktiviteten
+3 = svære begrænsninger: Borgeren deltager og kan under forudsætning af omfattende personassitance udføre aktiviteten. 
+4 = Totale begrænsninger: Borgeren er ude af stand til at udføre aktiviteten og har brug for fuldstændig personassistance 
+
+Husk at bruge de nyeste og mest RELEVANTE patientinformationer og brug ADL-vurderingen aktivt i dine besvarelser!!
+Inkludering altid ADL som et søgeord.
+
+I dine besvarelser skal du fokusere på KUN at besvare på patientens evne, kort og præcist og uden overflødig information.
+
+VIGTIGT FORMAT:
+Du skal VÆLGE ÉN status (0, 1, 2, 3 eller 4) - IKKE skrive "0/1/2/3/4" eller "3/4".
+
+KORREKT format:
+Status 2: forklaring med kilder
+
+FORKERT format:
+Status 0/1/2/3/4: forklaring
+Status 3/4: forklaring
+
+EKSEMPEL:
+Status 2: Patienten kan vaske sig med moderat personassistance [Kilde: ...]
+
+Sub_section: Vurder patientens evne til at vaske sig
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Ergoterapeut]
+
+Brug skalaen fra intro-sektionen og vurder kort og præcist patientens evne til at vaske sig.
+- Anvend ergoterapeutens ADL vurdering i din besvarelse
+- Benyt indlæggelsesrapporten aktivt, udskrives patienten til vanlig pleje er det nok at skrive ”patienten 
+udskrives til vanlig pleje”.
+
+Sub_section: Vurder patientens evne til at tage tøj på
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Ergoterapeut]
+
+Brug skalaen fra intro-sektionen og vurder kort og præcist patientens evne il at tage tøj på
+- Anvend ergoterapeutens ADL vurdering i din besvarelse
+- Benyt indlæggelsesrapporten aktivt, udskrives patienten til vanlig pleje er det nok at skrive ”patienten 
+udskrives til vanlig pleje”
+
+Sub_section: Vurder patientens evne til at gå på toilet
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Ergoterapeut]
+
+Brug skalaen fra intro-sektionen og vurder kort og præcist patientens evne il at gå på toilet
+- Anvend ergoterapeutens ADL vurdering i din besvarelse
+- Benyt indlæggelsesrapporten aktivt, udskrives patienten til vanlig pleje er det nok at skrive ”patienten 
+udskrives til vanlig pleje”
+
+Sub_section: Vurder patientens evne til at forflytte sig
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Ergoterapeut]
+
+Brug skalaen fra intro-sektionen og vurder kort og præcist patientens evne til at forflytte sig
+- Anvend ergoterapeutens ADL vurdering i din besvarelse og besvarelsen skal være kort
+- Benyt indlæggelsesrapporten aktivt, udskrives patienten til vanlig pleje er det nok at skrive ”patienten 
+udskrives til vanlig pleje”
+
+Sub_section: Vurder patientens evne til at færdes i forskellige omgivelser
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Ergoterapeut]
+
+Brug skalaen fra intro-sektionen og vurder kort og præcist patientens evne til at færdes i forskellige 
+omgivelser. Du skal give én samlet vurdering/status og besvarelsen skal være kort
+- Anvend ergoterapeutens ADL vurdering i din besvarelse
+- Benyt indlæggelsesrapporten aktivt, udskrives patienten til vanlig pleje er det nok at skrive ”patienten 
+udskrives til vanlig pleje”
+
+Sub_section: Vurder patientens evne til at drikke
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Ergoterapeut]
+
+Brug skalaen fra intro-sektionen og vurder kort og præcist patientens evne til at drikke
+- Anvend ergoterapeutens ADL vurdering i din besvarelse og besvarelsen skal være kort
+- Benyt indlæggelsesrapporten aktivt, udskrives patienten til vanlig pleje er det nok at skrive ”patienten 
+udskrives til vanlig pleje”
+
+Sub_section: Vurdér patientens evne til at spise
+
+[NOTE_TYPES: Sygeplejerske, Sygeplejestuderende, Social- og sundhedsassistent, Ergoterapeut]
+
+Brug skalaen fra intro-sektionen og vurder kort og præcist patientens evne til at drikke
+- Anvend ergoterapeutens ADL vurdering i din besvarelse og besvarelsen skal være kort
+- Benyt indlæggelsesrapporten aktivt, udskrives patienten til vanlig pleje er det nok at skrive ”patienten 
+udskrives til vanlig pleje”
