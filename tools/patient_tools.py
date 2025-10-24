@@ -10,7 +10,7 @@ from langchain_core.tools import tool
 from typing import List, Dict, Tuple, Optional
 
 from core.database import db_manager
-from config.settings import DANISH_CLINICAL_CATEGORIES, INITIAL_RETRIEVAL_K, FINAL_RETRIEVAL_K, SIMILARITY_SCORE_THRESHOLD, EMBEDDING_MODEL_NAME, EMBEDDING_DEVICE
+from config.settings import INITIAL_RETRIEVAL_K, FINAL_RETRIEVAL_K, SIMILARITY_SCORE_THRESHOLD, EMBEDDING_MODEL_NAME, EMBEDDING_DEVICE
 from utils.text_processing import parse_date_safe
 
 # Import RRF hybrid search components
@@ -276,21 +276,14 @@ class RRFPatientRetriever:
             content = doc.page_content.lower()
             doc_embeddings[id(doc)] = self.embedding_model.encode(content, convert_to_tensor=True)
         
-        # Ranking function with clinical reranking
+        # Ranking function with recency bonus
         def rank_score_with_metadata(doc):
             content = doc.page_content.lower()
             content_embedding = doc_embeddings[id(doc)]
-            
+
             # Base similarity score
             score = util.cos_sim(query_embedding, content_embedding)[0][0].item()
-            
-            # Category matching bonus
-            category = doc.metadata.get("category", "").lower()
-            for cat, keywords in DANISH_CLINICAL_CATEGORIES.items():
-                if cat in category or any(kw in content for kw in keywords):
-                    score += 0.3
-                    break
-            
+
             # Recency bonus
             date_str = doc.metadata.get("date", "")
             try:
@@ -323,27 +316,25 @@ class RRFPatientRetriever:
             # Extract metadata
             entry_type = doc.metadata.get("entry_type", "Note")
             date_str = doc.metadata.get("date", "") or "Ukendt dato"
-            category = doc.metadata.get("category", "Ukategoriseret")
             content = doc.page_content.strip()
-            
+
             # Add to sources list
             source_ref = {
                 'timestamp': date_str,
                 'entry_type': entry_type,
-                'category': category,
                 'relevance': relevance,
                 'snippet': content[:150],
                 'full_content': content,
                 'chroma_score': raw_score
             }
             sources.append(source_ref)
-            
+
             # Add to content
             content_parts.append(f"## [{i+1}] {entry_type} ({date_str})")
-            
+
             # Metadata summary
             meta_summary = [f"**Relevans:** {relevance}% match"]
-            
+
             # Time categorization
             try:
                 doc_date = parse_date_safe(date_str)
@@ -359,8 +350,7 @@ class RRFPatientRetriever:
                     meta_summary.append(f"**Periode:** {days_ago // 365} Ã¥r gammel")
             except:
                 meta_summary.append(f"**Dato:** {date_str}")
-            
-            meta_summary.append(f"**Kategori:** {category}")
+
             content_parts.append(f"*{' | '.join(meta_summary)}*\n")
             content_parts.append(content)
             content_parts.append("\n---\n")

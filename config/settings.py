@@ -67,33 +67,6 @@ DEFAULT_OUTPUT_NAME = "generated_medical_document.pdf"
 # Default patient file (if available)
 DEFAULT_PATIENT_FILE = PATIENT_RECORD_DIR / "Patient_journal_Geriatrisk_patient.pdf"
 
-# Clinical categories for patient information reranking
-DANISH_CLINICAL_CATEGORIES = {
-    "indlæggelse": ["indlæggelse", "indlæggelsesårsag", "indlæggelsesforløb", "indlæggelsesdato"],
-    "smitterisiko": ["smitterisiko", "isolering", "positiv dyrkning", "covid", "influenza"],
-    "bolig": ["boligændring", "etager", "adgangsforhold"],
-    "hjælpemidler": ["hjælpemiddel", "apv", "rollator", "badestol", "lift", "kørestol"],
-    "genoptræning": ["genoptræning", "rehabilitering", "fysioterapi", "ergoterapi"],
-    "hjemmesygepleje": ["hjemmesygepleje", "injektion", "sårpleje", "dauerbind"],
-    "medicin_administration": ["medicinadministration", "dosering", "tablet", "øjendråber", "injektion"],
-    "medicinindtagelse": ["medicinindtag", "indtager medicin", "knuses", "opløses", "slugning", "sonde"],
-    "kommunal_ydelse": ["kommunal indsats", "adl vurdering", "rengøring", "indkøb", "tøjvask"],
-    "udskrivningskonference": ["udskrivningskonference", "koordination", "kontakt primærsektor", "videomøde"],
-    "bevægeapparat": ["bevægelse", "faldtendens", "muskelstyrke", "balance", "immobilitet", "forflytning", "mobilisering", "rehabilitering", "styrke"],
-    "ernæring": ["ernæring", "væskeindtag", "kvalme", "sonde", "fejlsynkning", "kost", "diæt", "tørst", "appetit", "overvægt", "undervægt"],
-    "hud": ["sår", "plaster", "trykaflastning", "hudproblem", "bandage", "eksem", "kløe", "rødme", "hævelse"],
-    "kommunikation": ["kommunikation", "afasi", "dysartri", "tolk", "høreapparat", "synshandicap", "tale", "hørelse"],
-    "psykosocialt": ["psykosocial", "tristhed", "angst", "depression", "demens", "forvirring", "kognitiv", "hukommelse", "socialt netværk", "livskvalitet"],
-    "respiration": ["respiration", "dyspnø", "hoste", "ilt", "saturation", "pep-fløjte", "lunger", "bronkier", "krampe", "astma", "kol", "lungesygdom"],
-    "cirkulation": ["cirkulation", "blodtryk", "hypertension", "hypotension", "ødem", "cyanose", "blodprop", "hjerte", "kredsløb", "hjerte-kar-sygdom"],
-    "seksualitet": ["seksualitet", "erektion", "samlejesmerter", "samliv", "impotens", "seksuel dysfunktion", "libido", "prævention"],
-    "smerter_sansning": ["smerte", "vas", "brændende", "stikkende", "borende", "følelse", "nedsat følelse", "smertebehandling", "analgetika", "smertestillende"],
-    "søvn": ["søvn", "døgnrytme", "søvnproblemer", "mareridt", "udmattelse", "træthed", "insomni", "hypersomni"],
-    "viden": ["sygdomsindsigt", "egenomsorg", "forståelse", "compliance", "medvirken", "information", "undervisning", "vejledning"],
-    "udskillelse": ["vandladning", "afføring", "obstipation", "kateter", "urin", "ble", "mave", "tarm", "diarre", "inkontinens"],
-    "funktionsevne": ["forflytning", "toiletbesøg", "gå", "drikke", "spise", "tøj", "vask", "funktionsevne", "adl", "selvstændighed"],
-}
-
 # Date parsing formats for patient records
 DATE_FORMATS = ["%y.%m.%d %H:%M", "%y.%m.%d"]
 

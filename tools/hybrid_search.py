@@ -298,22 +298,21 @@ class RRFHybridSearch:
                 'content': doc.get('content', ''),
                 'entry_type': doc.get('entry_type', ''),
                 'date': doc.get('date', ''),
-                'category': doc.get('category', ''),
                 'document_id': doc.get('document_id', ''),
                 'chunk_index': doc.get('chunk_index', 0),
-                
+
                 'score': final_score,
                 'rrf_score': rrf_score,
-                
+
                 'semantic_score': semantic_score,
                 'keyword_score': keyword_score,
-                
+
                 'semantic_rank': semantic_rank,
                 'keyword_rank': keyword_rank,
-                
+
                 'cross_encoder_score': cross_encoder_score,
                 'recency_boost': recency_boost,
-                
+
                 'rrf_k': self.k,
                 'rank_window': rank_window
             }
@@ -459,8 +458,8 @@ class RRFHybridRetriever:
             
             documents = []
             for i, (doc_id, content, metadata) in enumerate(zip(
-                all_docs['ids'], 
-                all_docs['documents'], 
+                all_docs['ids'],
+                all_docs['documents'],
                 all_docs['metadatas']
             )):
                 doc = {
@@ -469,7 +468,6 @@ class RRFHybridRetriever:
                     'chunk_index': i,
                     'entry_type': metadata.get('entry_type', ''),
                     'date': metadata.get('date', ''),
-                    'category': metadata.get('category', ''),
                 }
                 documents.append(doc)
             
@@ -521,11 +519,10 @@ class RRFHybridRetriever:
             source_ref = {
                 'timestamp': result['date'],
                 'entry_type': result['entry_type'],
-                'category': result['category'],
                 'relevance': relevance,
                 'snippet': result['content'][:150],
                 'full_content': result['content'],
-                
+
                 # RRF-specific details
                 'rrf_score': result['rrf_score'],
                 'semantic_score': result['semantic_score'],

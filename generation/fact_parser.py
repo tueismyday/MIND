@@ -18,7 +18,6 @@ class RequiredFact:
     description: str  # What to look for
     priority: str  # "required" or "optional"
     search_query: str  # Optimized RAG query for this fact
-    category: str  # Clinical category
     note_types: List[str] = None # Allowed note types for this fact
 
 
@@ -240,46 +239,41 @@ Returner KUN valid JSON - ingen forklaring før eller efter!
                                subsection_title: str,
                                note_types: List[str]) -> RequiredFact:
         """Create RequiredFact from JSON data"""
-        
+
         try:
             description = fact_data.get('description', '').strip()
             search_query = fact_data.get('search_query', description).strip()
-            
+
             if not description:
                 return None
-            
-            # Infer category
-            category = self._infer_category(description)
-            
+
             return RequiredFact(
                 description=description,
                 priority="required",
                 search_query=search_query,
-                category=category,
                 note_types=note_types
             )
-            
+
         except Exception as e:
             print(f"[ERROR] Failed to create fact from JSON: {e}")
             return None
     
-    def _create_fallback_requirements(self, 
-                                     subsection_title: str, 
+    def _create_fallback_requirements(self,
+                                     subsection_title: str,
                                      subsection_guidelines: str,
                                      note_types: List[str]) -> SubsectionRequirements:
         """Create minimal requirements when parsing fails"""
-        
+
         print(f"[FALLBACK] Creating minimal requirements for '{subsection_title}'")
-        
+
         # Create single generic fact
         fallback_fact = RequiredFact(
             description=f"Information relateret til {subsection_title}",
             priority="required",
             search_query=subsection_title.lower(),
-            category="ukategoriseret",
             note_types=note_types
         )
-        
+
         return SubsectionRequirements(
             subsection_title=subsection_title,
             required_facts=[fallback_fact],
@@ -287,17 +281,3 @@ Returner KUN valid JSON - ingen forklaring før eller efter!
             complexity_score=1,
             note_types=note_types
         )
-     
-
-    def _infer_category(self, description: str) -> str:
-            """Infer clinical category from fact description"""
-            
-            from config.settings import DANISH_CLINICAL_CATEGORIES
-            
-            description_lower = description.lower()
-            
-            for category, keywords in DANISH_CLINICAL_CATEGORIES.items():
-                if any(kw in description_lower for kw in keywords):
-                    return category
-            
-            return "ukategoriseret"

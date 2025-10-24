@@ -52,11 +52,10 @@ from .settings import (
     PDF_FONT_PATH,
     DEFAULT_OUTPUT_NAME,
     DEFAULT_PATIENT_FILE,
-    
-    # Clinical categories
-    DANISH_CLINICAL_CATEGORIES,
+
+    # Date formats
     DATE_FORMATS,
-    
+
     # Utility functions
     ensure_directories,
     get_patient_file_path,
@@ -117,7 +116,7 @@ __all__ = [
     'DEFAULT_VALIDATION_CYCLES', 'MAX_VALIDATION_CYCLES', 'MIN_VALIDATION_CYCLES',
     'USE_HYBRID_MULTI_FACT_APPROACH', 'FACT_COMPLEXITY_THRESHOLD', 'MAX_SOURCES_PER_FACT',
     'PDF_FONT_PATH', 'DEFAULT_OUTPUT_NAME', 'DEFAULT_PATIENT_FILE',
-    'DANISH_CLINICAL_CATEGORIES', 'DATE_FORMATS',
+    'DATE_FORMATS',
     'ensure_directories', 'get_patient_file_path',
     
     # LLM
