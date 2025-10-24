@@ -8,46 +8,55 @@ from typing import Tuple, List
 from datetime import datetime
 from config.settings import DATE_FORMATS
 
-def split_section_into_subsections(section_text: str) -> Tuple[str, List[Tuple[str, str]]]:
+def split_section_into_subsections(section_text: str) -> List[dict]:
     """
     Splits section text into subsections based on 'Sub_section' markers.
-    
+
     Args:
         section_text (str): The text to split into subsections.
-        
+
     Returns:
-        tuple: (intro_text, list of (subsection_title, subsection_content) tuples)
+        List[dict]: List of subsection dictionaries with 'title', 'content', and optionally 'intro'
     """
     # First, check if there are any subsections
     if "Sub_section" not in section_text:
         # No subsections found, return the entire section as one
-        return section_text, [("Main Content", section_text)]
-    
+        return [{"title": "Main Content", "content": section_text}]
+
     # Split the text by "Sub_section" markers
     parts = re.split(r'(Sub_section:\s*[^\n]+)', section_text)
-    
+
     # The first part (before any Sub_section) is the introduction
     intro_text = parts[0].strip()
-    
+
     subsections = []
     for i in range(1, len(parts), 2):
         if i < len(parts) - 1:
             subsection_header = parts[i].strip()  # "Sub_section: Title"
             subsection_content = parts[i + 1].strip()
-            
+
             # Extract title from "Sub_section: Title"
             title_match = re.match(r'Sub_section:\s*(.+)', subsection_header)
             if title_match:
                 clean_title = title_match.group(1).strip()
             else:
                 clean_title = f"Subsection {i//2 + 1}"
-                
-            subsections.append((clean_title, subsection_content))
-    
+
+            subsection_dict = {
+                "title": clean_title,
+                "content": subsection_content
+            }
+
+            # Add intro only to the first subsection
+            if i == 1 and intro_text:
+                subsection_dict["intro"] = intro_text
+
+            subsections.append(subsection_dict)
+
     if not subsections:
-        return section_text, [("Main Content", section_text)]
-    
-    return intro_text, subsections
+        return [{"title": "Main Content", "content": section_text}]
+
+    return subsections
 
 def parse_date_safe(date_str: str) -> datetime:
     """
