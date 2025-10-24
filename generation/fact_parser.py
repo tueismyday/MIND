@@ -27,7 +27,6 @@ class SubsectionRequirements:
     """Structured requirements for a subsection"""
     subsection_title: str
     required_facts: List[RequiredFact]
-    optional_facts: List[RequiredFact]
     format_instructions: str
     complexity_score: int  # 0-10, based on number of facts
     note_types: List[str] = None  # Note types for entire subsection
@@ -114,22 +113,12 @@ VIGTIGT - Håndter følgende:
 3. FORMAT KRAV skal indeholde instruktioner om HVORDAN der skal svares (f.eks. "besvar kort", "pas på ikke at konkludere", "giv bedste bud")
 4. Lister med "f.eks." betyder ALLE eksemplerne er potentielle fakta
 
-Marker hvert faktum som:
-- required (skal absolut besvares)
-- optional (nice-to-have)
-
 ## OUTPUT FORMAT - DU SKAL RETURNERE JSON ##
 
 Returner KUN et JSON objekt med denne struktur (ingen tekst før eller efter):
 
 {{
   "required_facts": [
-    {{
-      "description": "Præcis beskrivelse af faktum",
-      "search_query": "optimeret søgestreng for RAG"
-    }}
-  ],
-  "optional_facts": [
     {{
       "description": "Præcis beskrivelse af faktum",
       "search_query": "optimeret søgestreng for RAG"
@@ -155,7 +144,6 @@ Korrekt JSON:
       "search_query": "medicin tabletter øjendråber administration"
     }}
   ],
-  "optional_facts": [],
   "format_instructions": "Svar meget kort. Pas på ikke at konkludere. Giv bedste bud baseret på patientens tilstand."
 }}
 
@@ -224,26 +212,18 @@ Returner KUN valid JSON - ingen forklaring før eller efter!
                 fact = self._create_fact_from_json(fact_data, section_title, subsection_title, note_types)
                 if fact:
                     required_facts.append(fact)
-            
-            # Parse optional facts
-            optional_facts = []
-            for fact_data in data.get('optional_facts', []):
-                fact = self._create_fact_from_json(fact_data, section_title, subsection_title, note_types)
-                if fact:
-                    optional_facts.append(fact)
-            
+
             # Extract format instructions
             format_instructions = data.get('format_instructions', '')
-            
+
             # Calculate complexity
-            complexity = len(required_facts) + (len(optional_facts) // 2)
-            
-            print(f"[SUCCESS] Parsed {len(required_facts)} required + {len(optional_facts)} optional facts")
-            
+            complexity = len(required_facts)
+
+            print(f"[SUCCESS] Parsed {len(required_facts)} required facts")
+
             return SubsectionRequirements(
                 subsection_title=subsection_title,
                 required_facts=required_facts,
-                optional_facts=optional_facts,
                 format_instructions=format_instructions,
                 complexity_score=min(complexity, 10),
                 note_types=note_types
@@ -303,7 +283,6 @@ Returner KUN valid JSON - ingen forklaring før eller efter!
         return SubsectionRequirements(
             subsection_title=subsection_title,
             required_facts=[fallback_fact],
-            optional_facts=[],
             format_instructions=subsection_guidelines[:200],
             complexity_score=1,
             note_types=note_types
