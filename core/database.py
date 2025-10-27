@@ -11,7 +11,6 @@ from config.settings import (
     GENERATED_DOCS_DB_DIR,
     ensure_directories
 )
-from tools.hybrid_search import initialize_reranker
 
 class DatabaseManager:
     """Manages all vector database instances."""
@@ -24,6 +23,9 @@ class DatabaseManager:
 
         # Pre-load reranker model at startup (while GPU memory still available)
         # This prevents OOM errors when reranker loads lazily during first retrieval
+        # Import here to avoid circular import (tools.patient_tools imports db_manager)
+        from tools.hybrid_search import initialize_reranker
+
         print("[INFO] Pre-loading reranker model at startup...")
         self.reranker = initialize_reranker()
         print("[INFO] All models loaded successfully")
