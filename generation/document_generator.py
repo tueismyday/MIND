@@ -94,14 +94,22 @@ class EnhancedDocumentGenerator:
             print(f"[DEBUG] Section '{title}' guideline type: {type(guideline)}")
             print(f"[DEBUG] Section '{title}' guideline length: {len(guideline) if isinstance(guideline, (str, list)) else 'N/A'}")
 
-            # Generate section using hybrid approach
-            section_output, section_sources, validation_details = generate_section_with_hybrid_approach(
-                section_title=title,
-                section_guidelines=guideline,
-                patient_data=patient_data,
-                max_sources_per_fact=max_references_per_section // 2 if max_references_per_section > 1 else 1,
-                enable_validation=enable_validation
-            )
+            try:
+                # Generate section using hybrid approach
+                section_output, section_sources, validation_details = generate_section_with_hybrid_approach(
+                    section_title=title,
+                    section_guidelines=guideline,
+                    patient_data=patient_data,
+                    max_sources_per_fact=max_references_per_section // 2 if max_references_per_section > 1 else 1,
+                    enable_validation=enable_validation
+                )
+            except Exception as e:
+                print(f"\n[ERROR] Failed while processing section '{title}'")
+                print(f"[ERROR] Section guideline type was: {type(guideline)}")
+                print(f"[ERROR] Error message: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                raise  # Re-raise to propagate the error
             
             # Store sources and validation details
             self.all_sources_used.extend(section_sources)

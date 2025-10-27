@@ -271,7 +271,14 @@ def generate_section_with_hybrid_approach(
     print(f"[DEBUG] section_guidelines length: {len(section_guidelines) if section_guidelines else 0} chars")
     print(f"[DEBUG] First 100 chars: {section_guidelines[:100] if section_guidelines else 'EMPTY'}")
 
-    subsections = split_section_into_subsections(section_guidelines)
+    try:
+        subsections = split_section_into_subsections(section_guidelines)
+    except Exception as e:
+        print(f"[ERROR] split_section_into_subsections failed!")
+        print(f"[ERROR] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
 
     print(f"[DEBUG] split_section_into_subsections returned type: {type(subsections)}")
     print(f"[DEBUG] Number of subsections: {len(subsections) if subsections else 0}")
@@ -297,16 +304,29 @@ def generate_section_with_hybrid_approach(
     all_validation_details = {}
 
     # Safely extract section intro with type checking
+    print(f"[DEBUG] Extracting section intro...")
     section_intro = ""
-    if subsections and isinstance(subsections, list) and len(subsections) > 0:
-        first_subsection = subsections[0]
-        if isinstance(first_subsection, dict) and 'intro' in first_subsection:
-            section_intro = first_subsection['intro']
+    try:
+        if subsections and isinstance(subsections, list) and len(subsections) > 0:
+            first_subsection = subsections[0]
+            print(f"[DEBUG] first_subsection type: {type(first_subsection)}")
+            if isinstance(first_subsection, dict) and 'intro' in first_subsection:
+                section_intro = first_subsection['intro']
+                print(f"[DEBUG] Using intro from first subsection")
+            else:
+                # Fallback: use first 500 chars of section_guidelines
+                section_intro = str(section_guidelines)[:500] if section_guidelines else ""
+                print(f"[DEBUG] No intro in first subsection, using section_guidelines[:500]")
         else:
-            # Fallback: use first 500 chars of section_guidelines
             section_intro = str(section_guidelines)[:500] if section_guidelines else ""
-    else:
-        section_intro = str(section_guidelines)[:500] if section_guidelines else ""
+            print(f"[DEBUG] No subsections or empty list, using section_guidelines[:500]")
+    except Exception as e:
+        print(f"[ERROR] Failed while extracting section intro!")
+        print(f"[ERROR] subsections type: {type(subsections)}")
+        print(f"[ERROR] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
     
     for subsection in subsections:
         # Type safety: ensure subsection is a dict with required keys

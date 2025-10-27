@@ -139,9 +139,10 @@ Examples:
         
     except Exception as e:
         print(f"\n[ERROR] Document generation failed: {str(e)}")
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
+        # ALWAYS print full traceback to identify the exact error location
+        import traceback
+        print("\n[FULL TRACEBACK]")
+        traceback.print_exc()
         sys.exit(1)
 
 def generate_document_direct(query: str, patient_pdf_path: str, output_name: str,
