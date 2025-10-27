@@ -162,7 +162,10 @@ def safe_llm_invoke(prompt: str,
             print(f"[ERROR] LLM invocation failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
 
             if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)  # Exponential backoff
+                # Exponential backoff: 2s, 4s, 8s - gives vLLM server time to recover
+                backoff_delay = 2 * (2 ** attempt)
+                print(f"[INFO] Waiting {backoff_delay}s before retry...")
+                time.sleep(backoff_delay)
 
     # All retries failed
     print(f"[CRITICAL] LLM invocation failed after {max_retries} attempts: {last_error}")
