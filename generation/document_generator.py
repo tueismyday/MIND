@@ -95,11 +95,20 @@ class EnhancedDocumentGenerator:
             print(f"[DEBUG] Section '{title}' guideline length: {len(guideline) if isinstance(guideline, (str, list)) else 'N/A'}")
 
             # Generate section using hybrid approach
+            # Calculate sources per fact: ensure at least 2-3 sources per fact for better evidence
+            # For small values (<=3), use the value directly; for larger values, use half
+            if max_references_per_section <= 3:
+                sources_per_fact = max(2, max_references_per_section)  # At least 2 sources
+            else:
+                sources_per_fact = max(3, max_references_per_section // 2)  # At least 3 for larger values
+
+            print(f"[CONFIG] max_references_per_section={max_references_per_section}, sources_per_fact={sources_per_fact}")
+
             section_output, section_sources, validation_details = generate_section_with_hybrid_approach(
                 section_title=title,
                 section_guidelines=guideline,
                 patient_data=patient_data,
-                max_sources_per_fact=max_references_per_section // 2 if max_references_per_section > 1 else 1,
+                max_sources_per_fact=sources_per_fact,
                 enable_validation=enable_validation
             )
             
