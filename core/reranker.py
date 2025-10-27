@@ -77,7 +77,36 @@ def get_reranker() -> CrossEncoder:
             print(f"[INFO] Attempting to load reranker on {device}...")
             reranker = CrossEncoder(RERANKER_MODEL_NAME, device=device)
 
-            print(f"[SUCCESS] Reranker loaded successfully on {device}")
+            # Verify the model works with a test prediction
+            print(f"[INFO] Verifying reranker functionality with test prediction...")
+            try:
+                test_pairs = [['Test query', 'Test document']]
+                test_scores = reranker.predict(test_pairs)
+                print(f"[INFO] Test prediction successful (score: {test_scores[0]:.4f})")
+            except Exception as test_error:
+                error_msg = str(test_error).lower()
+                print(f"[WARNING] Test prediction failed on {device}: {str(test_error)}")
+
+                # Check if it's a CUDA/GPU error during usage
+                if any(keyword in error_msg for keyword in ['cuda', 'nvml', 'gpu', 'device', 'caching']):
+                    print(f"[WARNING] GPU error detected during model usage - model may be in inconsistent state")
+
+                    # Clean up CUDA cache
+                    if device.startswith("cuda") and torch.cuda.is_available():
+                        print(f"[INFO] Clearing CUDA cache...")
+                        torch.cuda.empty_cache()
+
+                    # Don't cache this broken model
+                    if device != "cpu":
+                        print(f"[INFO] Will try CPU fallback...")
+                        continue  # Move to next device
+                    else:
+                        raise Exception(f"Model failed even on CPU: {str(test_error)}")
+                else:
+                    # Non-GPU error during test
+                    raise test_error
+
+            print(f"[SUCCESS] Reranker loaded and verified successfully on {device}")
 
             # Cache the model for future use (singleton pattern)
             _reranker_model_cache = reranker
@@ -88,6 +117,12 @@ def get_reranker() -> CrossEncoder:
 
         except torch.cuda.OutOfMemoryError as e:
             print(f"[WARNING] GPU out of memory on {device}: {str(e)}")
+
+            # Clean up CUDA cache before fallback
+            if device.startswith("cuda") and torch.cuda.is_available():
+                print(f"[INFO] Clearing CUDA cache...")
+                torch.cuda.empty_cache()
+
             if device != "cpu":
                 print(f"[INFO] Will try CPU fallback...")
                 last_error = e
@@ -100,8 +135,14 @@ def get_reranker() -> CrossEncoder:
             print(f"[WARNING] Failed to load on {device}: {str(e)}")
 
             # Check if it's a GPU-related error
-            if any(keyword in error_msg for keyword in ['cuda', 'gpu', 'memory', 'device']):
+            if any(keyword in error_msg for keyword in ['cuda', 'gpu', 'memory', 'device', 'nvml', 'caching']):
                 print(f"[INFO] GPU-related error detected, will try CPU fallback...")
+
+                # Clean up CUDA cache before fallback
+                if device.startswith("cuda") and torch.cuda.is_available():
+                    print(f"[INFO] Clearing CUDA cache...")
+                    torch.cuda.empty_cache()
+
                 last_error = e
                 continue  # Move to next device
 
