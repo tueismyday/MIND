@@ -5,11 +5,12 @@ This guide explains how to configure the MIND system to run the embedding and re
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Quick Start](#quick-start)
-3. [Understanding GPU Memory Allocation](#understanding-gpu-memory-allocation)
-4. [Configuration Options](#configuration-options)
-5. [Troubleshooting](#troubleshooting)
-6. [Advanced Configuration](#advanced-configuration)
+2. [vLLM Modes](#vllm-modes)
+3. [Quick Start](#quick-start)
+4. [Understanding GPU Memory Allocation](#understanding-gpu-memory-allocation)
+5. [Configuration Options](#configuration-options)
+6. [Troubleshooting](#troubleshooting)
+7. [Advanced Configuration](#advanced-configuration)
 
 ## Overview
 
@@ -20,6 +21,92 @@ The MIND system uses three main GPU-intensive components:
 3. **Reranker Model**: Qwen3-Reranker-0.6B (~1.2GB) for relevance scoring
 
 **Total GPU memory needed**: ~2.5-3GB for embedding + reranker (with buffer)
+
+## vLLM Modes
+
+The MIND system supports two modes for running vLLM:
+
+### Server Mode (Default)
+
+**How it works**: vLLM runs as a separate server process, and the MIND system connects to it via HTTP API (OpenAI-compatible).
+
+**Advantages**:
+- vLLM server and application run in separate processes
+- Can restart application without reloading the model
+- Multiple applications can share the same vLLM server
+- Better for development and debugging
+
+**Setup**:
+```bash
+# 1. Start vLLM server (in one terminal)
+vllm serve cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit \
+    --max-model-len 14000 \
+    --gpu-memory-utilization 0.70 \
+    --max-num-seqs 1 \
+    --cpu-offload-gb 32
+
+# 2. Run your application (in another terminal)
+export VLLM_MODE=server  # This is the default
+export VLLM_SERVER_URL=http://localhost:8000  # Default URL
+python main.py
+```
+
+### Local Mode (In-Python)
+
+**How it works**: vLLM is loaded directly in the Python process using `from vllm import LLM`.
+
+**Advantages**:
+- Single process - simpler deployment
+- No need for separate vLLM server
+- Slightly lower latency (no HTTP overhead)
+- Better for production deployments
+
+**Disadvantages**:
+- Model reloads every time application restarts
+- Higher memory usage in single process
+- Cannot share model across multiple applications
+
+**Setup**:
+```bash
+# No separate vLLM server needed!
+export VLLM_MODE=local
+export VLLM_MODEL_NAME=cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit
+export VLLM_GPU_MEMORY_UTILIZATION=0.75
+export VLLM_MAX_MODEL_LEN=14000
+python main.py
+```
+
+### Configuration Options
+
+Add these to your environment or `.env` file:
+
+```bash
+# Mode selection
+VLLM_MODE=server              # or "local"
+
+# Server mode options
+VLLM_SERVER_URL=http://localhost:8000
+VLLM_MODEL_NAME=cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit
+
+# Local mode options (only used when VLLM_MODE=local)
+VLLM_GPU_MEMORY_UTILIZATION=0.75  # 0.0-1.0
+VLLM_MAX_MODEL_LEN=14000
+VLLM_MAX_NUM_SEQS=1
+```
+
+### When to Use Which Mode
+
+**Use Server Mode when**:
+- Developing and debugging (faster iteration)
+- Multiple applications need the same model
+- You want to restart application without reloading model
+- You have separate server infrastructure
+
+**Use Local Mode when**:
+- Deploying to production (simpler)
+- Running on a single machine
+- You want minimal setup
+- Lower latency is important
 
 ## Quick Start
 

@@ -118,6 +118,17 @@ PATIENT_SEARCH_K = 5  # k value for patient record searches in tools
 GENERATION_TEMPERATURE = 0.2
 CRITIQUE_TEMPERATURE = 0.1
 
+# vLLM configuration
+# Mode: "server" (localhost API) or "local" (in-Python instance)
+VLLM_MODE = os.environ.get('VLLM_MODE', 'server')  # "server" or "local"
+VLLM_SERVER_URL = os.environ.get('VLLM_SERVER_URL', 'http://localhost:8000')
+VLLM_MODEL_NAME = os.environ.get('VLLM_MODEL_NAME', 'cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit')
+
+# vLLM local mode configuration (only used when VLLM_MODE="local")
+VLLM_GPU_MEMORY_UTILIZATION = float(os.environ.get('VLLM_GPU_MEMORY_UTILIZATION', '0.75'))
+VLLM_MAX_MODEL_LEN = int(os.environ.get('VLLM_MAX_MODEL_LEN', '14000'))
+VLLM_MAX_NUM_SEQS = int(os.environ.get('VLLM_MAX_NUM_SEQS', '1'))
+
 # Validation configuration
 DEFAULT_VALIDATION_CYCLES = 2  # Default number of validation/revision cycles per subsection
 MAX_VALIDATION_CYCLES = 3      # Maximum allowed validation cycles
