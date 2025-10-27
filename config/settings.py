@@ -32,9 +32,20 @@ RERANKER_MODEL_NAME = "Qwen/Qwen3-Reranker-0.6B"
 # Options: "cuda", "cuda:0", "cuda:1", "cpu"
 # When using vLLM, adjust --gpu-memory-utilization to leave space for embedding/reranker
 # Recommended: vLLM with 0.70-0.75 utilization to leave ~25-30% for these models
+
+# Device selection mode for each model
+# Options: "auto" (automatic device selection with GPU memory check), "cpu" (force CPU), "cuda" (force GPU)
+EMBEDDING_DEVICE_MODE = os.environ.get('EMBEDDING_DEVICE_MODE', 'auto').lower()
+RERANKER_DEVICE_MODE = os.environ.get('RERANKER_DEVICE_MODE', 'auto').lower()
+
 def get_device_config():
     """
     Get device configuration with intelligent fallback.
+
+    Respects EMBEDDING_DEVICE_MODE and RERANKER_DEVICE_MODE settings:
+    - "auto": Automatic device selection with GPU memory check
+    - "cpu": Force CPU usage
+    - "cuda": Force GPU usage (cuda:0)
 
     Uses torch.cuda.mem_get_info() which queries the CUDA driver directly
     to get ACTUAL free memory, accounting for vLLM or any other GPU usage.
@@ -42,16 +53,61 @@ def get_device_config():
     Returns:
         tuple: (embedding_device, reranker_device, device_info)
     """
-    # Check if user explicitly wants CPU via environment variable
-    force_cpu = os.environ.get('EMBEDDING_DEVICE', '').lower() == 'cpu'
+    embedding_device = None
+    reranker_device = None
+    device_info_parts = []
 
+    # Check legacy environment variable for backward compatibility
+    force_cpu = os.environ.get('EMBEDDING_DEVICE', '').lower() == 'cpu'
     if force_cpu:
+        print(f"[INFO] Legacy EMBEDDING_DEVICE=cpu detected, forcing CPU mode")
         return "cpu", "cpu", "CPU forced via EMBEDDING_DEVICE environment variable"
 
-    if not torch.cuda.is_available():
-        return "cpu", "cpu", "No CUDA available, using CPU"
+    # Handle embedding device mode
+    if EMBEDDING_DEVICE_MODE == "cpu":
+        embedding_device = "cpu"
+        device_info_parts.append("Embedding: CPU (manual)")
+        print(f"[DEVICE CONFIG] Embedding device: CPU (manual selection)")
+    elif EMBEDDING_DEVICE_MODE == "cuda":
+        if torch.cuda.is_available():
+            embedding_device = "cuda"
+            device_info_parts.append("Embedding: CUDA (manual)")
+            print(f"[DEVICE CONFIG] Embedding device: CUDA (manual selection)")
+        else:
+            print(f"[WARNING] CUDA requested for embedding but not available, using CPU")
+            embedding_device = "cpu"
+            device_info_parts.append("Embedding: CPU (CUDA unavailable)")
+    # else: auto mode, will be determined below
 
-    # Check available GPU memory
+    # Handle reranker device mode
+    if RERANKER_DEVICE_MODE == "cpu":
+        reranker_device = "cpu"
+        device_info_parts.append("Reranker: CPU (manual)")
+        print(f"[DEVICE CONFIG] Reranker device: CPU (manual selection)")
+    elif RERANKER_DEVICE_MODE == "cuda":
+        if torch.cuda.is_available():
+            reranker_device = "cuda"
+            device_info_parts.append("Reranker: CUDA (manual)")
+            print(f"[DEVICE CONFIG] Reranker device: CUDA (manual selection)")
+        else:
+            print(f"[WARNING] CUDA requested for reranker but not available, using CPU")
+            reranker_device = "cpu"
+            device_info_parts.append("Reranker: CPU (CUDA unavailable)")
+    # else: auto mode, will be determined below
+
+    # If both devices are already determined (manual mode), return early
+    if embedding_device is not None and reranker_device is not None:
+        device_info = ", ".join(device_info_parts)
+        return embedding_device, reranker_device, device_info
+
+    # Auto mode: Check CUDA availability and memory
+    if not torch.cuda.is_available():
+        final_embedding = embedding_device if embedding_device else "cpu"
+        final_reranker = reranker_device if reranker_device else "cpu"
+        device_info_parts.append("No CUDA available")
+        return final_embedding, final_reranker, ", ".join(device_info_parts)
+
+    # Check available GPU memory for auto mode devices
     try:
         # CRITICAL: Use mem_get_info() which queries CUDA driver directly
         # This shows ACTUAL free memory including vLLM usage
@@ -63,10 +119,10 @@ def get_device_config():
         # Get device properties for name
         device_props = torch.cuda.get_device_properties(0)
 
-        device_info = (f"GPU: {device_props.name}, Total: {total_memory:.2f}GB, "
-                      f"Used: {used_memory:.2f}GB, Free: {free_memory:.2f}GB")
+        gpu_info = (f"GPU: {device_props.name}, Total: {total_memory:.2f}GB, "
+                   f"Used: {used_memory:.2f}GB, Free: {free_memory:.2f}GB")
 
-        print(f"[GPU MEMORY] {device_info}")
+        print(f"[GPU MEMORY] {gpu_info}")
 
         # Memory requirements:
         # - Embedding model (Qwen3-Embedding-0.6B): ~1.2GB
@@ -76,22 +132,41 @@ def get_device_config():
 
         MIN_FREE_MEMORY_GB = 2.5  # Minimum free memory to attempt GPU usage
 
+        auto_device = None
         if free_memory >= MIN_FREE_MEMORY_GB:
             print(f"[GPU MEMORY] ✓ Sufficient free memory ({free_memory:.2f}GB ≥ {MIN_FREE_MEMORY_GB}GB)")
-            print(f"[GPU MEMORY] ✓ Will load embedding and reranker models on GPU")
-            return "cuda", "cuda", device_info
+            print(f"[GPU MEMORY] ✓ Auto mode will use GPU")
+            auto_device = "cuda"
         else:
             print(f"[GPU MEMORY] ✗ Insufficient free memory ({free_memory:.2f}GB < {MIN_FREE_MEMORY_GB}GB)")
-            print(f"[GPU MEMORY] → Falling back to CPU for embeddings/reranker")
+            print(f"[GPU MEMORY] → Auto mode will use CPU")
             if used_memory > 5.0:
                 print(f"[GPU MEMORY] → vLLM using {used_memory:.2f}GB")
                 print(f"[GPU MEMORY] → Consider lowering vLLM --gpu-memory-utilization to 0.70-0.75")
-            return "cpu", "cpu", device_info
+            auto_device = "cpu"
+
+        # Apply auto device to models in auto mode
+        if embedding_device is None:
+            embedding_device = auto_device
+            device_info_parts.append(f"Embedding: {auto_device.upper()} (auto)")
+
+        if reranker_device is None:
+            reranker_device = auto_device
+            device_info_parts.append(f"Reranker: {auto_device.upper()} (auto)")
+
+        device_info_parts.append(gpu_info)
+        return embedding_device, reranker_device, ", ".join(device_info_parts)
 
     except Exception as e:
         print(f"[WARNING] Error checking GPU memory: {e}")
-        print(f"[INFO] Defaulting to CPU for safety")
-        return "cpu", "cpu", f"Error checking GPU: {e}"
+        print(f"[INFO] Auto mode defaulting to CPU for safety")
+
+        # Apply CPU to auto mode devices
+        final_embedding = embedding_device if embedding_device else "cpu"
+        final_reranker = reranker_device if reranker_device else "cpu"
+        device_info_parts.append(f"Error checking GPU: {e}")
+
+        return final_embedding, final_reranker, ", ".join(device_info_parts)
 
 # Get device configuration at startup
 EMBEDDING_DEVICE, RERANKER_DEVICE, DEVICE_INFO = get_device_config()

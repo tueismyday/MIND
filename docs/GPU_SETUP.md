@@ -204,9 +204,61 @@ Result: All models on GPU ✅
 
 ## Configuration Options
 
+### Device Selection Modes
+
+The system supports three device selection modes for both embedding and reranker models:
+
+1. **`auto`** (Default): Automatic device selection with GPU memory check
+2. **`cpu`**: Force CPU usage
+3. **`cuda`**: Force GPU usage
+
+Each model (embedding and reranker) can be configured independently.
+
+### Configuration via Environment Variables (Recommended)
+
+You can configure device selection modes using environment variables:
+
+```bash
+# Both models use automatic selection (default)
+export EMBEDDING_DEVICE_MODE=auto
+export RERANKER_DEVICE_MODE=auto
+
+# Force embedding to CPU, reranker to GPU
+export EMBEDDING_DEVICE_MODE=cpu
+export RERANKER_DEVICE_MODE=cuda
+
+# Force both to CPU
+export EMBEDDING_DEVICE_MODE=cpu
+export RERANKER_DEVICE_MODE=cpu
+
+# Force both to GPU
+export EMBEDDING_DEVICE_MODE=cuda
+export RERANKER_DEVICE_MODE=cuda
+```
+
+You can also add these to your `.env` file:
+
+```bash
+# .env file
+EMBEDDING_DEVICE_MODE=auto
+RERANKER_DEVICE_MODE=auto
+```
+
+### Configuration in settings.py
+
+You can also modify `config/settings.py` directly:
+
+**File**: `config/settings.py`
+
+```python
+# Device selection modes (default: auto)
+EMBEDDING_DEVICE_MODE = "auto"  # or "cpu", "cuda"
+RERANKER_DEVICE_MODE = "auto"   # or "cpu", "cuda"
+```
+
 ### Automatic Device Selection (Default)
 
-The system automatically selects the appropriate device based on available GPU memory:
+When using `auto` mode, the system automatically selects the appropriate device based on available GPU memory:
 
 **File**: `config/settings.py`
 
@@ -217,31 +269,95 @@ EMBEDDING_DEVICE, RERANKER_DEVICE, DEVICE_INFO = get_device_config()
 
 This function:
 1. Checks if CUDA is available
-2. Measures free GPU memory
+2. Measures free GPU memory using `torch.cuda.mem_get_info()`
 3. Selects GPU if ≥2.5GB free, otherwise CPU
 4. Prints device info on startup
 
-### Manual Device Override
-
-You can manually override device selection:
-
-**File**: `config/settings.py`
-
-```python
-# Manual override - force GPU
-EMBEDDING_DEVICE = "cuda"  # or "cuda:0" for specific GPU
-RERANKER_DEVICE = "cuda"
-
-# Manual override - force CPU
-EMBEDDING_DEVICE = "cpu"
-RERANKER_DEVICE = "cpu"
-
-# Mixed configuration (if you have multiple GPUs)
-EMBEDDING_DEVICE = "cuda:0"  # Use first GPU
-RERANKER_DEVICE = "cuda:1"   # Use second GPU
+**Example output with auto mode**:
+```
+[DEVICE CONFIG] Embedding: cuda, Reranker: cuda
+[DEVICE INFO] Embedding: CUDA (auto), Reranker: CUDA (auto), GPU: NVIDIA GeForce RTX 3090, Total: 24.00GB, Used: 18.50GB, Free: 5.50GB
 ```
 
-**Note**: When manually setting to "cuda", the system will still fall back to CPU if GPU memory is insufficient.
+### Manual Device Selection
+
+**Force CPU mode**:
+```bash
+export EMBEDDING_DEVICE_MODE=cpu
+export RERANKER_DEVICE_MODE=cpu
+```
+
+**Example output**:
+```
+[DEVICE CONFIG] Embedding device: CPU (manual selection)
+[DEVICE CONFIG] Reranker device: CPU (manual selection)
+[DEVICE CONFIG] Embedding: cpu, Reranker: cpu
+[DEVICE INFO] Embedding: CPU (manual), Reranker: CPU (manual)
+```
+
+**Force GPU mode**:
+```bash
+export EMBEDDING_DEVICE_MODE=cuda
+export RERANKER_DEVICE_MODE=cuda
+```
+
+**Example output**:
+```
+[DEVICE CONFIG] Embedding device: CUDA (manual selection)
+[DEVICE CONFIG] Reranker device: CUDA (manual selection)
+[DEVICE CONFIG] Embedding: cuda, Reranker: cuda
+[DEVICE INFO] Embedding: CUDA (manual), Reranker: CUDA (manual)
+```
+
+**Note**: When manually setting to "cuda", the system will fall back to CPU if CUDA is not available on your system.
+
+### Mixed Configuration Examples
+
+**Example 1: Embedding on GPU, Reranker on CPU**
+```bash
+export EMBEDDING_DEVICE_MODE=cuda
+export RERANKER_DEVICE_MODE=cpu
+```
+
+**Example 2: Embedding on CPU, Reranker auto-select**
+```bash
+export EMBEDDING_DEVICE_MODE=cpu
+export RERANKER_DEVICE_MODE=auto  # Will use GPU if enough memory available
+```
+
+### When to Use Each Mode
+
+**Use `auto` mode when**:
+- You want the system to intelligently choose based on available memory
+- You're sharing GPU with vLLM
+- You want automatic CPU fallback if GPU memory is insufficient
+- You're unsure about your GPU memory situation
+
+**Use `cpu` mode when**:
+- You want to dedicate all GPU memory to vLLM
+- Your GPU is consistently running out of memory
+- You have a fast CPU and don't need GPU acceleration
+- You're debugging GPU-related issues
+
+**Use `cuda` mode when**:
+- You have dedicated GPU memory for embedding/reranker
+- You're not using vLLM on the same GPU
+- You have multiple GPUs and want deterministic placement
+- You need maximum performance and have sufficient GPU memory
+
+### Legacy Environment Variable
+
+For backward compatibility, the old `EMBEDDING_DEVICE` environment variable is still supported:
+
+```bash
+export EMBEDDING_DEVICE=cpu  # Forces both models to CPU
+```
+
+This is equivalent to:
+```bash
+export EMBEDDING_DEVICE_MODE=cpu
+export RERANKER_DEVICE_MODE=cpu
+```
 
 ## Troubleshooting
 
@@ -265,10 +381,18 @@ RuntimeError: CUDA out of memory. Tried to allocate X MiB
    ```
 
 3. **Use CPU for embedding/reranker** (temporary workaround):
-   Edit `config/settings.py`:
+
+   Option A - Environment variables (recommended):
+   ```bash
+   export EMBEDDING_DEVICE_MODE=cpu
+   export RERANKER_DEVICE_MODE=cpu
+   python main.py
+   ```
+
+   Option B - Edit `config/settings.py`:
    ```python
-   EMBEDDING_DEVICE = "cpu"
-   RERANKER_DEVICE = "cpu"
+   EMBEDDING_DEVICE_MODE = "cpu"
+   RERANKER_DEVICE_MODE = "cpu"
    ```
 
 4. **Clear GPU memory** (if vLLM is not running):
@@ -318,8 +442,13 @@ RuntimeError: CUDA out of memory. Tried to allocate X MiB
    - Reduce `--max-num-seqs` in vLLM
 
 2. **Use multiple GPUs** if available:
+
+   Note: Currently the device mode only supports "auto", "cpu", or "cuda" (which uses cuda:0).
+   For multi-GPU setups, you need to edit `config/settings.py` directly:
+
    ```python
    # config/settings.py
+   # Force specific GPU devices (bypasses device mode)
    EMBEDDING_DEVICE = "cuda:1"  # Use second GPU
    RERANKER_DEVICE = "cuda:1"
    ```

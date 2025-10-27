@@ -403,13 +403,28 @@ If `enable_validation=True`:
 ### RAG (Retrieval-Augmented Generation)
 - **Guideline DB**: ChromaDB vector database with hospital guidelines
 - **Patient EHR DB**: ChromaDB vector database with patient records
-- **Embeddings**: OpenAI embeddings for semantic search
+- **Embeddings**: Qwen3-Embedding-0.6B for semantic search (configurable CPU/GPU)
+- **Reranker**: Qwen3-Reranker-0.6B for relevance scoring (configurable CPU/GPU)
 - **Search**: RRF (Reciprocal Rank Fusion) for hybrid retrieval
 
 ### LLM Configuration
-- **Generation**: Configurable LLM (GPT-4, Claude, etc.)
+- **Generation**: Configurable LLM (vLLM with Qwen3-30B, GPT-4, Claude, etc.)
 - **Validation**: Two-stage validation with fact-checking and guideline adherence
 - **Fact Parsing**: JSON-based structured extraction
+
+### Device Configuration
+The system supports flexible device selection for embedding and reranker models:
+- **Auto mode** (default): Automatically selects GPU or CPU based on available memory
+- **CPU mode**: Forces CPU usage (useful when GPU is fully utilized by vLLM)
+- **GPU mode**: Forces GPU usage (requires sufficient free GPU memory)
+
+Configure via environment variables:
+```bash
+export EMBEDDING_DEVICE_MODE=auto   # or "cpu", "cuda"
+export RERANKER_DEVICE_MODE=auto    # or "cpu", "cuda"
+```
+
+For detailed GPU configuration and vLLM setup, see [GPU Setup Guide](docs/GPU_SETUP.md).
 
 ### Quality Assurance
 - **Two-stage validation**:
