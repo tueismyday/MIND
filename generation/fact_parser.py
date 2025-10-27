@@ -156,7 +156,8 @@ Returner KUN valid JSON - ingen forklaring før eller efter!
                 parsing_prompt,
                 self.llm,
                 max_retries=3,
-                fallback_response=None
+                fallback_response=None,
+                operation="guideline_parsing"
             )
             
             if not response or not response.strip():

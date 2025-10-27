@@ -59,13 +59,13 @@ Skriv dit svar nu (kun svaret, ingen forklaring):
 """
         
         try:
-            answer = safe_llm_invoke(prompt, self.llm, max_retries=2)
-            
+            answer = safe_llm_invoke(prompt, self.llm, max_retries=2, operation="fact_answering")
+
             if not answer or "UNANSWERABLE" in answer.upper():
                 return "UNANSWERABLE", False
-            
+
             return answer.strip(), True
-            
+
         except Exception as e:
             print(f"[ERROR] Failed to answer fact '{fact.description[:50]}': {e}")
             return "UNANSWERABLE", False
@@ -135,17 +135,17 @@ Skriv kun den sammensatte tekst (ingen forklaring før eller efter):
 """
         
         try:
-            assembled_text = safe_llm_invoke(assembly_prompt, self.llm, max_retries=2)
-            
+            assembled_text = safe_llm_invoke(assembly_prompt, self.llm, max_retries=2, operation="fact_assembly")
+
             if not assembled_text:
                 # Fallback: just concatenate
                 assembled_text = "\n\n".join([fa['answer'] for fa in answerable])
-            
+
             return {
                 'answer': assembled_text.strip(),
                 'unanswerable_items': unanswerable
             }
-            
+
         except Exception as e:
             print(f"[ERROR] Assembly failed: {e}, using simple concatenation")
             return {

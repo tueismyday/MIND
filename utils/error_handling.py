@@ -7,6 +7,13 @@ import time
 from typing import Callable, Any, Optional, List, Dict, Tuple
 from functools import wraps
 
+# Import token tracker for usage tracking
+try:
+    from .token_tracker import get_token_tracker
+    TOKEN_TRACKING_AVAILABLE = True
+except ImportError:
+    TOKEN_TRACKING_AVAILABLE = False
+
 
 class GenerationError(Exception):
     """Base exception for document generation errors"""
@@ -107,40 +114,56 @@ def safe_rag_search(query: str,
         return fallback_result
 
 
-def safe_llm_invoke(prompt: str, 
+def safe_llm_invoke(prompt: str,
                    llm_instance: Any,
                    max_retries: int = 3,
-                   fallback_response: str = "LLM kunne ikke generere svar") -> str:
+                   fallback_response: str = "LLM kunne ikke generere svar",
+                   operation: str = "unknown") -> str:
     """
-    Safely invoke LLM with retry logic.
-    
+    Safely invoke LLM with retry logic and token usage tracking.
+
     Args:
         prompt: LLM prompt
         llm_instance: LLM instance to use
         max_retries: Max retry attempts
         fallback_response: Response on complete failure
-        
+        operation: Operation name for token tracking (e.g., "fact_answering", "validation")
+
     Returns:
         LLM response or fallback
     """
-        
+
     last_error = None
-    
+
     for attempt in range(max_retries):
         try:
             response = llm_instance.invoke(
                 prompt,
                     tags=["safe_invoke", f"attempt_{attempt + 1}"]
             )
+
+            # Track token usage if enabled
+            if TOKEN_TRACKING_AVAILABLE:
+                tracker = get_token_tracker()
+                if tracker.is_enabled() and hasattr(llm_instance, 'last_usage') and llm_instance.last_usage:
+                    usage = llm_instance.last_usage
+                    tracker.record(
+                        prompt_tokens=usage.get('prompt_tokens', 0),
+                        completion_tokens=usage.get('completion_tokens', 0),
+                        total_tokens=usage.get('total_tokens', 0),
+                        operation=operation,
+                        model=getattr(llm_instance, 'model_name', 'unknown')
+                    )
+
             return response
-            
+
         except Exception as e:
             last_error = e
             print(f"[ERROR] LLM invocation failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
-            
+
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)  # Exponential backoff
-    
+
     # All retries failed
     print(f"[CRITICAL] LLM invocation failed after {max_retries} attempts: {last_error}")
     return fallback_response

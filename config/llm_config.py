@@ -7,12 +7,13 @@ from .settings import GENERATION_TEMPERATURE, CRITIQUE_TEMPERATURE
 
 class VLLMClient:
     """vLLM client wrapper compatible with your existing interface."""
-    
+
     def __init__(self, model_name, temperature=0.7, base_url="http://localhost:8000"):
         self.model_name = model_name
         self.temperature = temperature
         self.base_url = base_url.rstrip('/')
-        
+        self.last_usage = None  # Store token usage from last invocation
+
         self.client = OpenAI(
             api_key="EMPTY",  # vLLM doesn't require API key
             base_url=f"{self.base_url}/v1",
@@ -21,6 +22,7 @@ class VLLMClient:
     def invoke(self, prompt, **kwargs):
         """
         Invoke method to maintain compatibility with langchain interface.
+        Captures token usage information for tracking purposes.
         """
         try:
             response = self.client.chat.completions.create(
@@ -30,15 +32,25 @@ class VLLMClient:
                 max_tokens=kwargs.get('max_tokens', 6056),
                 top_p=kwargs.get('top_p', 0.9),
             )
-            
+
+            # Capture token usage information if available
+            if hasattr(response, 'usage') and response.usage:
+                self.last_usage = {
+                    'prompt_tokens': response.usage.prompt_tokens,
+                    'completion_tokens': response.usage.completion_tokens,
+                    'total_tokens': response.usage.total_tokens
+                }
+            else:
+                self.last_usage = None
+
             # Safety check for None response
             content = response.choices[0].message.content
-            
+
             if content is None:
                 print(f"[ERROR] vLLM returned None response")
                 print(f"[DEBUG] Prompt length: {len(prompt)} chars")
                 raise RuntimeError("vLLM returned empty response - prompt may be too long or server issue")
-            
+
             return content.strip()
             
         except AttributeError as e:
