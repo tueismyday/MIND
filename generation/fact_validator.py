@@ -64,13 +64,13 @@ Skriv kun enten "VALID" eller det korrigerede svar:
 """
         
         try:
-            validation_result = safe_llm_invoke(validation_prompt, self.llm, max_retries=1)
-            
+            validation_result = safe_llm_invoke(validation_prompt, self.llm, max_retries=1, operation="fact_validation")
+
             if not validation_result:
                 return answer, False
-            
+
             validation_result = validation_result.strip()
-            
+
             if validation_result.upper() == "VALID":
                 print(f"  ✓ Fact valid: {fact.description[:50]}")
                 return answer, False
@@ -78,7 +78,7 @@ Skriv kun enten "VALID" eller det korrigerede svar:
                 # LLM provided corrected answer
                 print(f"  ⚠ Fact corrected: {fact.description[:50]}")
                 return validation_result, True
-                
+
         except Exception as e:
             print(f"[ERROR] Validation failed for fact '{fact.description[:50]}': {e}")
             return answer, False

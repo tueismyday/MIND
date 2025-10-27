@@ -18,6 +18,7 @@ from tools.guideline_tools import retrieve_guidelines_by_section
 from generation.document_generator import DocumentGenerator
 from config.settings import get_patient_file_path, DEFAULT_OUTPUT_NAME, ensure_directories
 from config.reference_settings import REFERENCE_PRESETS, apply_preset
+from utils.token_tracker import get_token_tracker
 
 def main():
     """Main function with command-line interface for direct document generation."""
@@ -69,12 +70,18 @@ Examples:
     
     # Setup
     ensure_directories()
-    
+
+    # Enable token tracking if verbose mode is enabled
     if args.verbose:
         print("=" * 60)
         print("DIRECT MEDICAL DOCUMENT GENERATOR")
         print("=" * 60)
         db_manager.print_database_info()
+
+        # Enable token usage tracking
+        tracker = get_token_tracker()
+        tracker.enable()
+        print("\n[TOKEN TRACKING] Token usage tracking enabled")
     
     # Validate patient file
     if not os.path.exists(args.patient):
@@ -134,9 +141,15 @@ Examples:
             show_statistics=show_stats,
             verbose=args.verbose
         )
-        
+
         print(f"\n[SUCCESS] Document generated: {args.output}")
-        
+
+        # Print token usage report if verbose mode was enabled
+        if args.verbose:
+            tracker = get_token_tracker()
+            if tracker.is_enabled():
+                tracker.print_report(detailed=True)
+
     except Exception as e:
         print(f"\n[ERROR] Document generation failed: {str(e)}")
         if args.verbose:
