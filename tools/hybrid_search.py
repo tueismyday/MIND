@@ -45,8 +45,9 @@ class RRFHybridSearch:
         """
         Load cross-encoder model with GPU/CPU fallback handling.
 
-        IMPORTANT: When vLLM is running, RERANKER_DEVICE should be 'cpu'
-        to avoid GPU memory conflicts.
+        Uses torch.cuda.mem_get_info() to accurately detect free GPU memory,
+        accounting for vLLM or other GPU usage. Automatically falls back to
+        CPU if insufficient memory is available.
 
         Returns:
             CrossEncoder: Loaded cross-encoder model
@@ -71,21 +72,21 @@ class RRFHybridSearch:
                 # Check GPU memory if using CUDA
                 if device.startswith("cuda"):
                     gpu_idx = 0 if device == "cuda" else int(device.split(":")[1])
-                    props = torch.cuda.get_device_properties(gpu_idx)
-                    allocated_mem = torch.cuda.memory_allocated(gpu_idx) / (1024**3)
-                    reserved_mem = torch.cuda.memory_reserved(gpu_idx) / (1024**3)
-                    free_mem = (props.total_memory - torch.cuda.memory_reserved(gpu_idx)) / (1024**3)
 
-                    print(f"[INFO] GPU memory - Free: {free_mem:.2f}GB, Reserved: {reserved_mem:.2f}GB, Allocated: {allocated_mem:.2f}GB")
+                    # Use mem_get_info() for ACTUAL free memory (includes vLLM usage)
+                    free_mem_bytes, total_mem_bytes = torch.cuda.mem_get_info(gpu_idx)
+                    free_mem = free_mem_bytes / (1024**3)
+                    total_mem = total_mem_bytes / (1024**3)
+                    used_mem = total_mem - free_mem
 
-                    # CRITICAL: If GPU is already in use (likely vLLM), skip to CPU
-                    if reserved_mem > 1.0 or allocated_mem > 0.5:
-                        print(f"[WARNING] GPU already in use (reserved: {reserved_mem:.2f}GB, allocated: {allocated_mem:.2f}GB)")
-                        print(f"[INFO] Skipping GPU to avoid conflicts, using CPU instead")
-                        continue  # Skip to CPU
+                    print(f"[RERANKER GPU] Total: {total_mem:.2f}GB, Used: {used_mem:.2f}GB, Free: {free_mem:.2f}GB")
 
-                    if free_mem < 2.0:
-                        print(f"[WARNING] Low GPU memory ({free_mem:.2f}GB), skipping GPU")
+                    # Need at least 1.5GB free for reranker model (0.6B params ≈ 1.2GB + buffer)
+                    MIN_FREE_FOR_RERANKER = 1.5
+
+                    if free_mem < MIN_FREE_FOR_RERANKER:
+                        print(f"[RERANKER GPU] Insufficient free memory ({free_mem:.2f}GB < {MIN_FREE_FOR_RERANKER}GB)")
+                        print(f"[RERANKER GPU] Falling back to CPU")
                         continue  # Skip to CPU
 
                 cross_encoder = CrossEncoder(RERANKER_MODEL_NAME, device=device)

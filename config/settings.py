@@ -36,8 +36,8 @@ def get_device_config():
     """
     Get device configuration with intelligent fallback.
 
-    IMPORTANT: When vLLM is running, always use CPU for embeddings to avoid conflicts.
-    The torch.cuda.memory_reserved() check is unreliable when vLLM is using the GPU.
+    Uses torch.cuda.mem_get_info() which queries the CUDA driver directly
+    to get ACTUAL free memory, accounting for vLLM or any other GPU usage.
 
     Returns:
         tuple: (embedding_device, reranker_device, device_info)
@@ -53,33 +53,39 @@ def get_device_config():
 
     # Check available GPU memory
     try:
-        # Get GPU memory info
-        device_props = torch.cuda.get_device_properties(0)
-        total_memory = device_props.total_memory / (1024**3)  # Convert to GB
+        # CRITICAL: Use mem_get_info() which queries CUDA driver directly
+        # This shows ACTUAL free memory including vLLM usage
+        free_memory_bytes, total_memory_bytes = torch.cuda.mem_get_info(0)
+        free_memory = free_memory_bytes / (1024**3)  # Convert to GB
+        total_memory = total_memory_bytes / (1024**3)
+        used_memory = total_memory - free_memory
 
-        # Get currently allocated memory
-        allocated_memory = torch.cuda.memory_allocated(0) / (1024**3)
-        reserved_memory = torch.cuda.memory_reserved(0) / (1024**3)
-        free_memory = total_memory - reserved_memory
+        # Get device properties for name
+        device_props = torch.cuda.get_device_properties(0)
 
         device_info = (f"GPU: {device_props.name}, Total: {total_memory:.2f}GB, "
-                      f"Free: {free_memory:.2f}GB, Allocated: {allocated_memory:.2f}GB")
+                      f"Used: {used_memory:.2f}GB, Free: {free_memory:.2f}GB")
 
-        # CRITICAL FIX: Be much more conservative with GPU usage
-        # If ANY memory is already allocated/reserved, assume vLLM or another service is using the GPU
-        # Default to CPU to avoid conflicts and crashes
-        if reserved_memory > 1.0 or allocated_memory > 0.5:
-            print(f"[INFO] GPU appears to be in use (reserved: {reserved_memory:.2f}GB, allocated: {allocated_memory:.2f}GB)")
-            print(f"[INFO] Using CPU for embeddings/reranker to avoid conflicts with vLLM")
-            return "cpu", "cpu", device_info
+        print(f"[GPU MEMORY] {device_info}")
 
-        # Only use GPU if there's substantial free memory AND nothing else is using it
-        if free_memory >= 4.0:
-            print(f"[INFO] Sufficient GPU memory available ({free_memory:.2f}GB free)")
+        # Memory requirements:
+        # - Embedding model (Qwen3-Embedding-0.6B): ~1.2GB
+        # - Reranker model (Qwen3-Reranker-0.6B): ~1.2GB
+        # - Safety buffer: ~0.5GB
+        # Total needed: ~3GB free
+
+        MIN_FREE_MEMORY_GB = 2.5  # Minimum free memory to attempt GPU usage
+
+        if free_memory >= MIN_FREE_MEMORY_GB:
+            print(f"[GPU MEMORY] ✓ Sufficient free memory ({free_memory:.2f}GB ≥ {MIN_FREE_MEMORY_GB}GB)")
+            print(f"[GPU MEMORY] ✓ Will load embedding and reranker models on GPU")
             return "cuda", "cuda", device_info
         else:
-            print(f"[INFO] Limited GPU memory ({free_memory:.2f}GB free, need ≥4GB for safe GPU usage)")
-            print(f"[INFO] Using CPU for embeddings/reranker")
+            print(f"[GPU MEMORY] ✗ Insufficient free memory ({free_memory:.2f}GB < {MIN_FREE_MEMORY_GB}GB)")
+            print(f"[GPU MEMORY] → Falling back to CPU for embeddings/reranker")
+            if used_memory > 5.0:
+                print(f"[GPU MEMORY] → vLLM using {used_memory:.2f}GB")
+                print(f"[GPU MEMORY] → Consider lowering vLLM --gpu-memory-utilization to 0.70-0.75")
             return "cpu", "cpu", device_info
 
     except Exception as e:
