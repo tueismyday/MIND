@@ -18,6 +18,11 @@ def split_section_into_subsections(section_text: str) -> List[dict]:
     Returns:
         List[dict]: List of subsection dictionaries with 'title', 'content', and optionally 'intro'
     """
+    # Type safety: ensure section_text is a string
+    if not isinstance(section_text, str):
+        print(f"[WARNING] split_section_into_subsections received non-string input (type: {type(section_text)}). Converting to string.")
+        section_text = str(section_text) if section_text else ""
+
     # First, check if there are any subsections
     if "Sub_section" not in section_text:
         # No subsections found, return the entire section as one
