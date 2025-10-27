@@ -266,7 +266,18 @@ def generate_section_with_hybrid_approach(
         print(f"[WARNING] section_guidelines is not a string (type: {type(section_guidelines)}). Converting to string.")
         section_guidelines = str(section_guidelines) if section_guidelines else ""
 
+    # DEBUG: Log the input and output of split_section_into_subsections
+    print(f"[DEBUG] Calling split_section_into_subsections with section_guidelines type: {type(section_guidelines)}")
+    print(f"[DEBUG] section_guidelines length: {len(section_guidelines) if section_guidelines else 0} chars")
+    print(f"[DEBUG] First 100 chars: {section_guidelines[:100] if section_guidelines else 'EMPTY'}")
+
     subsections = split_section_into_subsections(section_guidelines)
+
+    print(f"[DEBUG] split_section_into_subsections returned type: {type(subsections)}")
+    print(f"[DEBUG] Number of subsections: {len(subsections) if subsections else 0}")
+    if subsections:
+        for idx, sub in enumerate(subsections):
+            print(f"[DEBUG] subsections[{idx}] type: {type(sub)}, value: {sub if isinstance(sub, dict) else f'NON-DICT: {type(sub)}'}")
     
     if not subsections:
         # Treat entire section as single subsection

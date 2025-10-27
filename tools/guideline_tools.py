@@ -43,17 +43,20 @@ def retrieve_guidelines_by_section(query: str) -> dict:
     sections = {}
     for chunk_text, metadata in zip(section_results["documents"], section_results["metadatas"]):
         section_title = metadata.get("section_title", "Unknown Section")
-        
+
         if section_title == "Unknown Section":
             print(f"[WARNING] Skipping 'Unknown Section' in {best_doc}.")
             continue  # Skip processing this section
-        
+
         if section_title not in sections:
             sections[section_title] = ""
         sections[section_title] += chunk_text + "\n"
 
     # **DEBUG OUTPUT: Verify the final structure**
     print(f"[DEBUG] Retrieved Sections: {sections.keys()}")
+    print(f"[DEBUG] Section data types:")
+    for key, value in sections.items():
+        print(f"[DEBUG]   '{key}': type={type(value)}, length={len(value) if isinstance(value, str) else 'N/A'}")
     print("[RESULT] All sections has been gathered.")
     return sections
 
