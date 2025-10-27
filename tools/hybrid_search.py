@@ -45,6 +45,9 @@ class RRFHybridSearch:
         """
         Load cross-encoder model with GPU/CPU fallback handling.
 
+        IMPORTANT: When vLLM is running, RERANKER_DEVICE should be 'cpu'
+        to avoid GPU memory conflicts.
+
         Returns:
             CrossEncoder: Loaded cross-encoder model
         """
@@ -69,11 +72,21 @@ class RRFHybridSearch:
                 if device.startswith("cuda"):
                     gpu_idx = 0 if device == "cuda" else int(device.split(":")[1])
                     props = torch.cuda.get_device_properties(gpu_idx)
+                    allocated_mem = torch.cuda.memory_allocated(gpu_idx) / (1024**3)
+                    reserved_mem = torch.cuda.memory_reserved(gpu_idx) / (1024**3)
                     free_mem = (props.total_memory - torch.cuda.memory_reserved(gpu_idx)) / (1024**3)
-                    print(f"[INFO] GPU free memory: {free_mem:.2f}GB")
 
-                    if free_mem < 1.5:
-                        print(f"[WARNING] Low GPU memory ({free_mem:.2f}GB), loading may fail")
+                    print(f"[INFO] GPU memory - Free: {free_mem:.2f}GB, Reserved: {reserved_mem:.2f}GB, Allocated: {allocated_mem:.2f}GB")
+
+                    # CRITICAL: If GPU is already in use (likely vLLM), skip to CPU
+                    if reserved_mem > 1.0 or allocated_mem > 0.5:
+                        print(f"[WARNING] GPU already in use (reserved: {reserved_mem:.2f}GB, allocated: {allocated_mem:.2f}GB)")
+                        print(f"[INFO] Skipping GPU to avoid conflicts, using CPU instead")
+                        continue  # Skip to CPU
+
+                    if free_mem < 2.0:
+                        print(f"[WARNING] Low GPU memory ({free_mem:.2f}GB), skipping GPU")
+                        continue  # Skip to CPU
 
                 cross_encoder = CrossEncoder(RERANKER_MODEL_NAME, device=device)
 

@@ -36,9 +36,18 @@ def get_device_config():
     """
     Get device configuration with intelligent fallback.
 
+    IMPORTANT: When vLLM is running, always use CPU for embeddings to avoid conflicts.
+    The torch.cuda.memory_reserved() check is unreliable when vLLM is using the GPU.
+
     Returns:
         tuple: (embedding_device, reranker_device, device_info)
     """
+    # Check if user explicitly wants CPU via environment variable
+    force_cpu = os.environ.get('EMBEDDING_DEVICE', '').lower() == 'cpu'
+
+    if force_cpu:
+        return "cpu", "cpu", "CPU forced via EMBEDDING_DEVICE environment variable"
+
     if not torch.cuda.is_available():
         return "cpu", "cpu", "No CUDA available, using CPU"
 
@@ -56,13 +65,21 @@ def get_device_config():
         device_info = (f"GPU: {device_props.name}, Total: {total_memory:.2f}GB, "
                       f"Free: {free_memory:.2f}GB, Allocated: {allocated_memory:.2f}GB")
 
-        # If we have at least 2GB free, use GPU for both models
-        # Embedding model (~0.6B params ≈ 1.2GB) + Reranker (~0.6B params ≈ 1.2GB) ≈ 2.4GB total
-        if free_memory >= 2.5:
+        # CRITICAL FIX: Be much more conservative with GPU usage
+        # If ANY memory is already allocated/reserved, assume vLLM or another service is using the GPU
+        # Default to CPU to avoid conflicts and crashes
+        if reserved_memory > 1.0 or allocated_memory > 0.5:
+            print(f"[INFO] GPU appears to be in use (reserved: {reserved_memory:.2f}GB, allocated: {allocated_memory:.2f}GB)")
+            print(f"[INFO] Using CPU for embeddings/reranker to avoid conflicts with vLLM")
+            return "cpu", "cpu", device_info
+
+        # Only use GPU if there's substantial free memory AND nothing else is using it
+        if free_memory >= 4.0:
+            print(f"[INFO] Sufficient GPU memory available ({free_memory:.2f}GB free)")
             return "cuda", "cuda", device_info
         else:
-            print(f"[WARNING] Insufficient GPU memory ({free_memory:.2f}GB free, need ~2.5GB)")
-            print(f"[WARNING] Falling back to CPU for embedding and reranker models")
+            print(f"[INFO] Limited GPU memory ({free_memory:.2f}GB free, need ≥4GB for safe GPU usage)")
+            print(f"[INFO] Using CPU for embeddings/reranker")
             return "cpu", "cpu", device_info
 
     except Exception as e:
