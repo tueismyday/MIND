@@ -91,7 +91,9 @@ class EnhancedDocumentGenerator:
         
         for i, (title, guideline) in enumerate(guidelines.items(), 1):
             print(f"[INFO] Creating section {i}/{len(guidelines)}: '{title}'")
-            
+            print(f"[DEBUG] Section '{title}' guideline type: {type(guideline)}")
+            print(f"[DEBUG] Section '{title}' guideline length: {len(guideline) if isinstance(guideline, (str, list)) else 'N/A'}")
+
             # Generate section using hybrid approach
             section_output, section_sources, validation_details = generate_section_with_hybrid_approach(
                 section_title=title,

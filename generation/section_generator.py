@@ -253,15 +253,31 @@ def generate_section_with_hybrid_approach(
 ) -> Tuple[str, List[Dict], Dict]:
     """
     Generate entire section by splitting into subsections.
-    
+
     This function exists to maintain compatibility with document_generator.
     It splits the section into subsections and calls generate_subsection_with_hybrid_approach
     for each one.
     """
-    
+
     from utils.text_processing import split_section_into_subsections
-    
+
+    # Type safety: ensure section_guidelines is a string
+    if not isinstance(section_guidelines, str):
+        print(f"[WARNING] section_guidelines is not a string (type: {type(section_guidelines)}). Converting to string.")
+        section_guidelines = str(section_guidelines) if section_guidelines else ""
+
+    # DEBUG: Log the input and output of split_section_into_subsections
+    print(f"[DEBUG] Calling split_section_into_subsections with section_guidelines type: {type(section_guidelines)}")
+    print(f"[DEBUG] section_guidelines length: {len(section_guidelines) if section_guidelines else 0} chars")
+    print(f"[DEBUG] First 100 chars: {section_guidelines[:100] if section_guidelines else 'EMPTY'}")
+
     subsections = split_section_into_subsections(section_guidelines)
+
+    print(f"[DEBUG] split_section_into_subsections returned type: {type(subsections)}")
+    print(f"[DEBUG] Number of subsections: {len(subsections) if subsections else 0}")
+    if subsections:
+        for idx, sub in enumerate(subsections):
+            print(f"[DEBUG] subsections[{idx}] type: {type(sub)}, value: {sub if isinstance(sub, dict) else f'NON-DICT: {type(sub)}'}")
     
     if not subsections:
         # Treat entire section as single subsection
@@ -279,10 +295,29 @@ def generate_section_with_hybrid_approach(
     all_subsection_outputs = []
     all_sources = []
     all_validation_details = {}
-    
-    section_intro = subsections[0]['intro'] if subsections and subsections[0].get('intro') else section_guidelines[:500]
+
+    # Safely extract section intro with type checking
+    section_intro = ""
+    if subsections and isinstance(subsections, list) and len(subsections) > 0:
+        first_subsection = subsections[0]
+        if isinstance(first_subsection, dict) and 'intro' in first_subsection:
+            section_intro = first_subsection['intro']
+        else:
+            # Fallback: use first 500 chars of section_guidelines
+            section_intro = str(section_guidelines)[:500] if section_guidelines else ""
+    else:
+        section_intro = str(section_guidelines)[:500] if section_guidelines else ""
     
     for subsection in subsections:
+        # Type safety: ensure subsection is a dict with required keys
+        if not isinstance(subsection, dict):
+            print(f"[WARNING] Skipping invalid subsection (not a dict): {type(subsection)}")
+            continue
+
+        if 'title' not in subsection or 'content' not in subsection:
+            print(f"[WARNING] Skipping subsection missing required keys: {subsection.keys()}")
+            continue
+
         output, sources, validation = generate_subsection_with_hybrid_approach(
             section_title=section_title,
             subsection_title=subsection['title'],
@@ -292,7 +327,7 @@ def generate_section_with_hybrid_approach(
             max_sources_per_fact=max_sources_per_fact,
             enable_validation=enable_validation
         )
-        
+
         all_subsection_outputs.append(output)
         all_sources.extend(sources)
         all_validation_details[subsection['title']] = validation

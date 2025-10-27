@@ -18,13 +18,24 @@ def split_section_into_subsections(section_text: str) -> List[dict]:
     Returns:
         List[dict]: List of subsection dictionaries with 'title', 'content', and optionally 'intro'
     """
+    # Type safety: ensure section_text is a string
+    if not isinstance(section_text, str):
+        print(f"[WARNING] split_section_into_subsections received non-string input (type: {type(section_text)}). Converting to string.")
+        section_text = str(section_text) if section_text else ""
+
+    print(f"[DEBUG split_section_into_subsections] Input length: {len(section_text)} chars")
+    print(f"[DEBUG split_section_into_subsections] Contains 'Sub_section': {'Sub_section' in section_text}")
+
     # First, check if there are any subsections
     if "Sub_section" not in section_text:
         # No subsections found, return the entire section as one
-        return [{"title": "Main Content", "content": section_text}]
+        result = [{"title": "Main Content", "content": section_text}]
+        print(f"[DEBUG split_section_into_subsections] No subsections found, returning single dict")
+        return result
 
     # Split the text by "Sub_section" markers
     parts = re.split(r'(Sub_section:\s*[^\n]+)', section_text)
+    print(f"[DEBUG split_section_into_subsections] Split into {len(parts)} parts")
 
     # The first part (before any Sub_section) is the introduction
     intro_text = parts[0].strip()
@@ -54,8 +65,13 @@ def split_section_into_subsections(section_text: str) -> List[dict]:
             subsections.append(subsection_dict)
 
     if not subsections:
-        return [{"title": "Main Content", "content": section_text}]
+        result = [{"title": "Main Content", "content": section_text}]
+        print(f"[DEBUG split_section_into_subsections] No valid subsections parsed, returning single dict")
+        return result
 
+    print(f"[DEBUG split_section_into_subsections] Returning {len(subsections)} subsections")
+    for idx, sub in enumerate(subsections):
+        print(f"[DEBUG split_section_into_subsections]   subsection[{idx}]: type={type(sub)}, keys={sub.keys() if isinstance(sub, dict) else 'NOT A DICT'}")
     return subsections
 
 def parse_date_safe(date_str: str) -> datetime:
