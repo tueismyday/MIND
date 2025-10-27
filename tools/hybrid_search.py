@@ -13,16 +13,17 @@ from datetime import datetime
 
 from config.settings import RERANKER_MODEL_NAME, RERANKER_DEVICE
 from utils.text_processing import parse_date_safe
+import torch
 
 class RRFHybridSearch:
     """
     In-memory hybrid search using Reciprocal Rank Fusion (RRF) to combine semantic and keyword search.
     """
-    
+
     def __init__(self, embedding_model, k: int = 60):
         """
         Initialize RRF hybrid search.
-        
+
         Args:
             embedding_model: Sentence transformer for semantic embeddings
             k: RRF smoothing constant (typically 60)
@@ -32,10 +33,79 @@ class RRFHybridSearch:
         self.documents = []
         self.embeddings = None
         self.bm25 = None
-        
-        print("[INFO] Loading cross-encoder for relevance scoring...")
-        self.cross_encoder = CrossEncoder(RERANKER_MODEL_NAME, device=RERANKER_DEVICE)
-        print(f"[INFO] Cross-encoder loaded successfully: {RERANKER_MODEL_NAME}")
+
+        print(f"[INFO] Loading cross-encoder: {RERANKER_MODEL_NAME}")
+        print(f"[INFO] Target device: {RERANKER_DEVICE}")
+
+        # Load cross-encoder with fallback handling
+        self.cross_encoder = self._load_cross_encoder()
+        print(f"[SUCCESS] Cross-encoder loaded successfully")
+
+    def _load_cross_encoder(self):
+        """
+        Load cross-encoder model with GPU/CPU fallback handling.
+
+        Returns:
+            CrossEncoder: Loaded cross-encoder model
+        """
+        device_attempts = []
+
+        if RERANKER_DEVICE == "cuda" or RERANKER_DEVICE.startswith("cuda:"):
+            if torch.cuda.is_available():
+                device_attempts = [RERANKER_DEVICE, "cpu"]
+            else:
+                print(f"[WARNING] CUDA requested but not available, using CPU")
+                device_attempts = ["cpu"]
+        else:
+            device_attempts = [RERANKER_DEVICE]
+
+        last_error = None
+
+        for device in device_attempts:
+            try:
+                print(f"[INFO] Attempting to load cross-encoder on {device}...")
+
+                # Check GPU memory if using CUDA
+                if device.startswith("cuda"):
+                    gpu_idx = 0 if device == "cuda" else int(device.split(":")[1])
+                    props = torch.cuda.get_device_properties(gpu_idx)
+                    free_mem = (props.total_memory - torch.cuda.memory_reserved(gpu_idx)) / (1024**3)
+                    print(f"[INFO] GPU free memory: {free_mem:.2f}GB")
+
+                    if free_mem < 1.5:
+                        print(f"[WARNING] Low GPU memory ({free_mem:.2f}GB), loading may fail")
+
+                cross_encoder = CrossEncoder(RERANKER_MODEL_NAME, device=device)
+
+                print(f"[SUCCESS] Cross-encoder loaded on {device}")
+                return cross_encoder
+
+            except torch.cuda.OutOfMemoryError as e:
+                print(f"[WARNING] GPU out of memory: {str(e)}")
+                if device != "cpu":
+                    print(f"[INFO] Falling back to CPU...")
+                    last_error = e
+                    continue
+                else:
+                    raise Exception("Out of memory even on CPU - insufficient system resources")
+
+            except Exception as e:
+                error_msg = str(e).lower()
+                print(f"[WARNING] Failed to load on {device}: {str(e)}")
+
+                # Check if it's a GPU-related error
+                if any(keyword in error_msg for keyword in ['cuda', 'gpu', 'memory', 'device']):
+                    if device != "cpu":
+                        print(f"[INFO] GPU error detected, falling back to CPU...")
+                        last_error = e
+                        continue
+
+                last_error = e
+
+                if device == device_attempts[-1]:
+                    raise Exception(f"Failed to load cross-encoder on any device. Last error: {str(e)}")
+
+        raise Exception(f"Failed to load cross-encoder. Last error: {str(last_error)}")
         
         # Danish stopwords for better keyword matching
         self.danish_stopwords = {
