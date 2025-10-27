@@ -20,6 +20,101 @@ import torch
 _cross_encoder_cache = None
 _cross_encoder_device_cache = None
 
+def initialize_reranker():
+    """
+    Initialize the reranker model at startup to ensure it loads while GPU memory is available.
+
+    This function should be called during system initialization (e.g., in database.py)
+    to pre-load the reranker model when there's still sufficient GPU memory available.
+
+    Returns:
+        CrossEncoder: The loaded and cached cross-encoder model
+    """
+    global _cross_encoder_cache, _cross_encoder_device_cache
+
+    # Return cached model if already loaded
+    if _cross_encoder_cache is not None:
+        print(f"[INFO] Reranker already initialized (device: {_cross_encoder_device_cache})")
+        return _cross_encoder_cache
+
+    print(f"[INFO] Initializing reranker model at startup: {RERANKER_MODEL_NAME}")
+    print(f"[INFO] Target device: {RERANKER_DEVICE}")
+
+    device_attempts = []
+
+    if RERANKER_DEVICE == "cuda" or RERANKER_DEVICE.startswith("cuda:"):
+        if torch.cuda.is_available():
+            device_attempts = [RERANKER_DEVICE, "cpu"]
+        else:
+            print(f"[WARNING] CUDA requested but not available, using CPU")
+            device_attempts = ["cpu"]
+    else:
+        device_attempts = [RERANKER_DEVICE]
+
+    last_error = None
+
+    for device in device_attempts:
+        try:
+            print(f"[INFO] Attempting to load reranker on {device}...")
+
+            # Check GPU memory if using CUDA
+            if device.startswith("cuda"):
+                gpu_idx = 0 if device == "cuda" else int(device.split(":")[1])
+
+                # Use mem_get_info() for ACTUAL free memory (includes vLLM usage)
+                free_mem_bytes, total_mem_bytes = torch.cuda.mem_get_info(gpu_idx)
+                free_mem = free_mem_bytes / (1024**3)
+                total_mem = total_mem_bytes / (1024**3)
+                used_mem = total_mem - free_mem
+
+                print(f"[RERANKER GPU] Total: {total_mem:.2f}GB, Used: {used_mem:.2f}GB, Free: {free_mem:.2f}GB")
+
+                # Need at least 1.5GB free for reranker model (0.6B params ≈ 1.2GB + buffer)
+                MIN_FREE_FOR_RERANKER = 1.5
+
+                if free_mem < MIN_FREE_FOR_RERANKER:
+                    print(f"[RERANKER GPU] Insufficient free memory ({free_mem:.2f}GB < {MIN_FREE_FOR_RERANKER}GB)")
+                    print(f"[RERANKER GPU] Falling back to CPU")
+                    continue  # Skip to CPU
+
+            cross_encoder = CrossEncoder(RERANKER_MODEL_NAME, device=device)
+
+            print(f"[SUCCESS] Reranker loaded on {device}")
+
+            # Cache the model for future use (singleton pattern)
+            _cross_encoder_cache = cross_encoder
+            _cross_encoder_device_cache = device
+            print(f"[INFO] Reranker model cached for reuse")
+
+            return cross_encoder
+
+        except torch.cuda.OutOfMemoryError as e:
+            print(f"[WARNING] GPU out of memory: {str(e)}")
+            if device != "cpu":
+                print(f"[INFO] Falling back to CPU...")
+                last_error = e
+                continue
+            else:
+                raise Exception("Out of memory even on CPU - insufficient system resources")
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            print(f"[WARNING] Failed to load on {device}: {str(e)}")
+
+            # Check if it's a GPU-related error
+            if any(keyword in error_msg for keyword in ['cuda', 'gpu', 'memory', 'device']):
+                if device != "cpu":
+                    print(f"[INFO] GPU error detected, falling back to CPU...")
+                    last_error = e
+                    continue
+
+            last_error = e
+
+            if device == device_attempts[-1]:
+                raise Exception(f"Failed to load reranker on any device. Last error: {str(e)}")
+
+    raise Exception(f"Failed to load reranker. Last error: {str(last_error)}")
+
 class RRFHybridSearch:
     """
     In-memory hybrid search using Reciprocal Rank Fusion (RRF) to combine semantic and keyword search.
@@ -50,97 +145,14 @@ class RRFHybridSearch:
         """
         Load cross-encoder model with GPU/CPU fallback handling.
 
-        Uses torch.cuda.mem_get_info() to accurately detect free GPU memory,
-        accounting for vLLM or other GPU usage. Automatically falls back to
-        CPU if insufficient memory is available.
-
-        Uses singleton pattern - only loads the model once and returns cached
-        instance on subsequent calls.
+        Delegates to initialize_reranker() which handles all loading logic
+        and singleton caching.
 
         Returns:
             CrossEncoder: Loaded cross-encoder model
         """
-        global _cross_encoder_cache, _cross_encoder_device_cache
-
-        # Return cached model if already loaded
-        if _cross_encoder_cache is not None:
-            print(f"[INFO] Reusing cached cross-encoder model (device: {_cross_encoder_device_cache})")
-            return _cross_encoder_cache
-
-        device_attempts = []
-
-        if RERANKER_DEVICE == "cuda" or RERANKER_DEVICE.startswith("cuda:"):
-            if torch.cuda.is_available():
-                device_attempts = [RERANKER_DEVICE, "cpu"]
-            else:
-                print(f"[WARNING] CUDA requested but not available, using CPU")
-                device_attempts = ["cpu"]
-        else:
-            device_attempts = [RERANKER_DEVICE]
-
-        last_error = None
-
-        for device in device_attempts:
-            try:
-                print(f"[INFO] Attempting to load cross-encoder on {device}...")
-
-                # Check GPU memory if using CUDA
-                if device.startswith("cuda"):
-                    gpu_idx = 0 if device == "cuda" else int(device.split(":")[1])
-
-                    # Use mem_get_info() for ACTUAL free memory (includes vLLM usage)
-                    free_mem_bytes, total_mem_bytes = torch.cuda.mem_get_info(gpu_idx)
-                    free_mem = free_mem_bytes / (1024**3)
-                    total_mem = total_mem_bytes / (1024**3)
-                    used_mem = total_mem - free_mem
-
-                    print(f"[RERANKER GPU] Total: {total_mem:.2f}GB, Used: {used_mem:.2f}GB, Free: {free_mem:.2f}GB")
-
-                    # Need at least 1.5GB free for reranker model (0.6B params ≈ 1.2GB + buffer)
-                    MIN_FREE_FOR_RERANKER = 1.5
-
-                    if free_mem < MIN_FREE_FOR_RERANKER:
-                        print(f"[RERANKER GPU] Insufficient free memory ({free_mem:.2f}GB < {MIN_FREE_FOR_RERANKER}GB)")
-                        print(f"[RERANKER GPU] Falling back to CPU")
-                        continue  # Skip to CPU
-
-                cross_encoder = CrossEncoder(RERANKER_MODEL_NAME, device=device)
-
-                print(f"[SUCCESS] Cross-encoder loaded on {device}")
-
-                # Cache the model for future use (singleton pattern)
-                _cross_encoder_cache = cross_encoder
-                _cross_encoder_device_cache = device
-                print(f"[INFO] Cross-encoder model cached for reuse")
-
-                return cross_encoder
-
-            except torch.cuda.OutOfMemoryError as e:
-                print(f"[WARNING] GPU out of memory: {str(e)}")
-                if device != "cpu":
-                    print(f"[INFO] Falling back to CPU...")
-                    last_error = e
-                    continue
-                else:
-                    raise Exception("Out of memory even on CPU - insufficient system resources")
-
-            except Exception as e:
-                error_msg = str(e).lower()
-                print(f"[WARNING] Failed to load on {device}: {str(e)}")
-
-                # Check if it's a GPU-related error
-                if any(keyword in error_msg for keyword in ['cuda', 'gpu', 'memory', 'device']):
-                    if device != "cpu":
-                        print(f"[INFO] GPU error detected, falling back to CPU...")
-                        last_error = e
-                        continue
-
-                last_error = e
-
-                if device == device_attempts[-1]:
-                    raise Exception(f"Failed to load cross-encoder on any device. Last error: {str(e)}")
-
-        raise Exception(f"Failed to load cross-encoder. Last error: {str(last_error)}")
+        # Simply delegate to the standalone initialization function
+        return initialize_reranker()
         
         # Danish stopwords for better keyword matching
         self.danish_stopwords = {

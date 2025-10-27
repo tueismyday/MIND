@@ -6,18 +6,28 @@ Handles ChromaDB initialization and operations.
 from langchain_chroma import Chroma
 from .embeddings import get_embeddings
 from config.settings import (
-    GUIDELINE_DB_DIR, 
-    PATIENT_DB_DIR, 
+    GUIDELINE_DB_DIR,
+    PATIENT_DB_DIR,
     GENERATED_DOCS_DB_DIR,
     ensure_directories
 )
+from tools.hybrid_search import initialize_reranker
 
 class DatabaseManager:
     """Manages all vector database instances."""
-    
+
     def __init__(self):
         ensure_directories()
+
+        # Load embedding model at startup
         self.embeddings = get_embeddings()
+
+        # Pre-load reranker model at startup (while GPU memory still available)
+        # This prevents OOM errors when reranker loads lazily during first retrieval
+        print("[INFO] Pre-loading reranker model at startup...")
+        self.reranker = initialize_reranker()
+        print("[INFO] All models loaded successfully")
+
         self._patient_db = None
         self._guideline_db = None
         self._generated_docs_db = None
