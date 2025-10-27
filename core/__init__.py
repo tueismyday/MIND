@@ -1,6 +1,6 @@
 """
 Core components package for the Agentic RAG Medical Documentation System.
-Provides database management, embeddings, and memory management.
+Provides database management, embeddings, reranker, and memory management.
 """
 
 # Database management
@@ -12,6 +12,9 @@ from .database import (
 # Embeddings
 from .embeddings import get_embeddings
 
+# Reranker
+from .reranker import get_reranker
+
 # Memory management
 from .memory import (
     MemoryManager,
@@ -22,10 +25,13 @@ __all__ = [
     # Database
     'DatabaseManager',
     'db_manager',
-    
+
     # Embeddings
     'get_embeddings',
-    
+
+    # Reranker
+    'get_reranker',
+
     # Memory
     'MemoryManager',
     'memory_manager',
