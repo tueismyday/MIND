@@ -27,8 +27,53 @@ CACHE_DIR = DATA_DIR / "sentence_transformers_cache"
 # Embedding model configuration
 EMBEDDING_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
 RERANKER_MODEL_NAME = "Qwen/Qwen3-Reranker-0.6B"
-EMBEDDING_DEVICE = "cpu" # "cuda" if torch.cuda.is_available() else 
-RERANKER_DEVICE = "cpu"
+
+# Device configuration for models
+# Options: "cuda", "cuda:0", "cuda:1", "cpu"
+# When using vLLM, adjust --gpu-memory-utilization to leave space for embedding/reranker
+# Recommended: vLLM with 0.70-0.75 utilization to leave ~25-30% for these models
+def get_device_config():
+    """
+    Get device configuration with intelligent fallback.
+
+    Returns:
+        tuple: (embedding_device, reranker_device, device_info)
+    """
+    if not torch.cuda.is_available():
+        return "cpu", "cpu", "No CUDA available, using CPU"
+
+    # Check available GPU memory
+    try:
+        # Get GPU memory info
+        device_props = torch.cuda.get_device_properties(0)
+        total_memory = device_props.total_memory / (1024**3)  # Convert to GB
+
+        # Get currently allocated memory
+        allocated_memory = torch.cuda.memory_allocated(0) / (1024**3)
+        reserved_memory = torch.cuda.memory_reserved(0) / (1024**3)
+        free_memory = total_memory - reserved_memory
+
+        device_info = (f"GPU: {device_props.name}, Total: {total_memory:.2f}GB, "
+                      f"Free: {free_memory:.2f}GB, Allocated: {allocated_memory:.2f}GB")
+
+        # If we have at least 2GB free, use GPU for both models
+        # Embedding model (~0.6B params ≈ 1.2GB) + Reranker (~0.6B params ≈ 1.2GB) ≈ 2.4GB total
+        if free_memory >= 2.5:
+            return "cuda", "cuda", device_info
+        else:
+            print(f"[WARNING] Insufficient GPU memory ({free_memory:.2f}GB free, need ~2.5GB)")
+            print(f"[WARNING] Falling back to CPU for embedding and reranker models")
+            return "cpu", "cpu", device_info
+
+    except Exception as e:
+        print(f"[WARNING] Error checking GPU memory: {e}")
+        print(f"[INFO] Defaulting to CPU for safety")
+        return "cpu", "cpu", f"Error checking GPU: {e}"
+
+# Get device configuration at startup
+EMBEDDING_DEVICE, RERANKER_DEVICE, DEVICE_INFO = get_device_config()
+print(f"[DEVICE CONFIG] Embedding: {EMBEDDING_DEVICE}, Reranker: {RERANKER_DEVICE}")
+print(f"[DEVICE INFO] {DEVICE_INFO}")
 
 # Agent configuration
 MAX_AGENT_ITERATIONS = 10
