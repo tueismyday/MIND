@@ -93,12 +93,41 @@ def get_embeddings() -> HuggingFaceEmbeddings:
                     **kwargs
                 )
 
-                print(f"[SUCCESS] Embeddings loaded successfully on {device}")
-
                 # Verify device placement
                 if hasattr(embeddings, 'client') and hasattr(embeddings.client, 'device'):
                     actual_device = str(embeddings.client.device)
                     print(f"[INFO] Model device verified: {actual_device}")
+
+                # Verify the model works with a test embedding
+                print(f"[INFO] Verifying embedding functionality with test embedding...")
+                try:
+                    test_text = "Test embedding"
+                    test_vector = embeddings.embed_query(test_text)
+                    print(f"[INFO] Test embedding successful (dimension: {len(test_vector)})")
+                except Exception as test_error:
+                    error_msg = str(test_error).lower()
+                    print(f"[WARNING] Test embedding failed on {device}: {str(test_error)}")
+
+                    # Check if it's a CUDA/GPU error during usage
+                    if any(keyword in error_msg for keyword in ['cuda', 'nvml', 'gpu', 'device', 'caching']):
+                        print(f"[WARNING] GPU error detected during model usage - model may be in inconsistent state")
+
+                        # Clean up CUDA cache
+                        if device.startswith("cuda") and torch.cuda.is_available():
+                            print(f"[INFO] Clearing CUDA cache...")
+                            torch.cuda.empty_cache()
+
+                        # Don't cache this broken model
+                        if device != "cpu":
+                            print(f"[INFO] Will try CPU fallback...")
+                            break  # Move to next device
+                        else:
+                            raise Exception(f"Model failed even on CPU: {str(test_error)}")
+                    else:
+                        # Non-GPU error during test
+                        raise test_error
+
+                print(f"[SUCCESS] Embeddings loaded and verified successfully on {device}")
 
                 # Cache the model for future use (singleton pattern)
                 _embedding_model_cache = embeddings
@@ -109,6 +138,12 @@ def get_embeddings() -> HuggingFaceEmbeddings:
 
             except torch.cuda.OutOfMemoryError as e:
                 print(f"[WARNING] GPU out of memory on {device}: {str(e)}")
+
+                # Clean up CUDA cache before fallback
+                if device.startswith("cuda") and torch.cuda.is_available():
+                    print(f"[INFO] Clearing CUDA cache...")
+                    torch.cuda.empty_cache()
+
                 if device != "cpu":
                     print(f"[INFO] Will try CPU fallback...")
                     break  # Move to next device (CPU)
@@ -120,8 +155,14 @@ def get_embeddings() -> HuggingFaceEmbeddings:
                 print(f"[WARNING] Method {i} on {device} failed: {str(e)}")
 
                 # Check if it's a GPU-related error
-                if any(keyword in error_msg for keyword in ['cuda', 'gpu', 'memory', 'device']):
+                if any(keyword in error_msg for keyword in ['cuda', 'gpu', 'memory', 'device', 'nvml', 'caching']):
                     print(f"[INFO] GPU-related error detected, will try CPU fallback...")
+
+                    # Clean up CUDA cache before fallback
+                    if device.startswith("cuda") and torch.cuda.is_available():
+                        print(f"[INFO] Clearing CUDA cache...")
+                        torch.cuda.empty_cache()
+
                     break  # Move to next device
 
                 if i == len(attempts):
