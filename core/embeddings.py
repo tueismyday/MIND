@@ -13,6 +13,10 @@ def get_embeddings() -> HuggingFaceEmbeddings:
     Get the configured embedding model with robust error handling.
     Automatically handles GPU/CPU device selection with fallback.
 
+    Uses torch.cuda.mem_get_info() to accurately detect free GPU memory,
+    accounting for vLLM or other GPU usage. Automatically falls back to
+    CPU if insufficient memory is available.
+
     Returns:
         HuggingFaceEmbeddings: Configured embedding model instance.
     """
@@ -35,6 +39,26 @@ def get_embeddings() -> HuggingFaceEmbeddings:
 
     # Try different device and loading strategies
     for device in device_attempts:
+        # Check GPU memory BEFORE attempting to load, to avoid wasteful attempts
+        if device.startswith("cuda"):
+            gpu_idx = 0 if device == "cuda" else int(device.split(":")[1])
+
+            # Use mem_get_info() for ACTUAL free memory (includes vLLM usage)
+            free_mem_bytes, total_mem_bytes = torch.cuda.mem_get_info(gpu_idx)
+            free_mem = free_mem_bytes / (1024**3)
+            total_mem = total_mem_bytes / (1024**3)
+            used_mem = total_mem - free_mem
+
+            print(f"[EMBEDDING GPU] Total: {total_mem:.2f}GB, Used: {used_mem:.2f}GB, Free: {free_mem:.2f}GB")
+
+            # Need at least 1.5GB free for embedding model (0.6B params ≈ 1.2GB + buffer)
+            MIN_FREE_FOR_EMBEDDING = 1.5
+
+            if free_mem < MIN_FREE_FOR_EMBEDDING:
+                print(f"[EMBEDDING GPU] Insufficient free memory ({free_mem:.2f}GB < {MIN_FREE_FOR_EMBEDDING}GB)")
+                print(f"[EMBEDDING GPU] Falling back to CPU")
+                continue  # Skip to CPU
+
         attempts = [
             # 1. Use system default cache (most reliable)
             {"model_kwargs": {'device': device}},
@@ -49,16 +73,6 @@ def get_embeddings() -> HuggingFaceEmbeddings:
         for i, kwargs in enumerate(attempts, 1):
             try:
                 print(f"[INFO] Attempting to load on {device} (method {i}/{len(attempts)})...")
-
-                # Check GPU memory before loading if using CUDA
-                if device.startswith("cuda"):
-                    gpu_idx = 0 if device == "cuda" else int(device.split(":")[1])
-                    props = torch.cuda.get_device_properties(gpu_idx)
-                    free_mem = (props.total_memory - torch.cuda.memory_reserved(gpu_idx)) / (1024**3)
-                    print(f"[INFO] GPU free memory: {free_mem:.2f}GB")
-
-                    if free_mem < 1.5:
-                        print(f"[WARNING] Low GPU memory ({free_mem:.2f}GB), loading may fail")
 
                 embeddings = HuggingFaceEmbeddings(
                     model_name=EMBEDDING_MODEL_NAME,
