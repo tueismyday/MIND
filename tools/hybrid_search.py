@@ -1,6 +1,7 @@
 """
 Enhanced lightweight in-memory hybrid search implementation with Reciprocal Rank Fusion (RRF).
 Combines semantic search with BM25 keyword search using RRF instead of simple weighted combination.
+Uses singleton pattern to prevent loading the same reranker model multiple times.
 """
 
 import numpy as np
@@ -14,6 +15,10 @@ from datetime import datetime
 from config.settings import RERANKER_MODEL_NAME, RERANKER_DEVICE
 from utils.text_processing import parse_date_safe
 import torch
+
+# Global cache for cross-encoder/reranker model (singleton pattern)
+_cross_encoder_cache = None
+_cross_encoder_device_cache = None
 
 class RRFHybridSearch:
     """
@@ -49,9 +54,19 @@ class RRFHybridSearch:
         accounting for vLLM or other GPU usage. Automatically falls back to
         CPU if insufficient memory is available.
 
+        Uses singleton pattern - only loads the model once and returns cached
+        instance on subsequent calls.
+
         Returns:
             CrossEncoder: Loaded cross-encoder model
         """
+        global _cross_encoder_cache, _cross_encoder_device_cache
+
+        # Return cached model if already loaded
+        if _cross_encoder_cache is not None:
+            print(f"[INFO] Reusing cached cross-encoder model (device: {_cross_encoder_device_cache})")
+            return _cross_encoder_cache
+
         device_attempts = []
 
         if RERANKER_DEVICE == "cuda" or RERANKER_DEVICE.startswith("cuda:"):
@@ -92,6 +107,12 @@ class RRFHybridSearch:
                 cross_encoder = CrossEncoder(RERANKER_MODEL_NAME, device=device)
 
                 print(f"[SUCCESS] Cross-encoder loaded on {device}")
+
+                # Cache the model for future use (singleton pattern)
+                _cross_encoder_cache = cross_encoder
+                _cross_encoder_device_cache = device
+                print(f"[INFO] Cross-encoder model cached for reuse")
+
                 return cross_encoder
 
             except torch.cuda.OutOfMemoryError as e:

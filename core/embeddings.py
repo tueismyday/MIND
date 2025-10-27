@@ -1,12 +1,17 @@
 """
 Embedding models and operations for the Agentic RAG Medical Documentation System.
 Handles HuggingFace embeddings with robust error handling and GPU support.
+Uses singleton pattern to prevent loading the same model multiple times.
 """
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from config.settings import EMBEDDING_MODEL_NAME, EMBEDDING_DEVICE
 import torch
 import os
+
+# Global cache for embedding model (singleton pattern)
+_embedding_model_cache = None
+_embedding_device_cache = None
 
 def get_embeddings() -> HuggingFaceEmbeddings:
     """
@@ -17,9 +22,18 @@ def get_embeddings() -> HuggingFaceEmbeddings:
     accounting for vLLM or other GPU usage. Automatically falls back to
     CPU if insufficient memory is available.
 
+    Uses singleton pattern - only loads the model once and returns cached
+    instance on subsequent calls.
+
     Returns:
         HuggingFaceEmbeddings: Configured embedding model instance.
     """
+    global _embedding_model_cache, _embedding_device_cache
+
+    # Return cached model if already loaded
+    if _embedding_model_cache is not None:
+        print(f"[INFO] Reusing cached embedding model (device: {_embedding_device_cache})")
+        return _embedding_model_cache
 
     print(f"[INFO] Loading embedding model: {EMBEDDING_MODEL_NAME}")
     print(f"[INFO] Target device: {EMBEDDING_DEVICE}")
@@ -85,6 +99,11 @@ def get_embeddings() -> HuggingFaceEmbeddings:
                 if hasattr(embeddings, 'client') and hasattr(embeddings.client, 'device'):
                     actual_device = str(embeddings.client.device)
                     print(f"[INFO] Model device verified: {actual_device}")
+
+                # Cache the model for future use (singleton pattern)
+                _embedding_model_cache = embeddings
+                _embedding_device_cache = device
+                print(f"[INFO] Embedding model cached for reuse")
 
                 return embeddings
 
