@@ -253,6 +253,79 @@ class GuidelineFactParser:
             cleaned_guidelines=cleaned_guidelines
         )
 
+        
+        print(f"[INFO] Parsing requirements for '{subsection_title}'")
+
+        # STEP 1: Extract note types (for hardcoded filtering)
+        note_types = self._extract_note_types(subsection_guidelines)
+
+        # STEP 2: Remove NOTE_TYPES markers from text before sending to LLM
+        # The LLM doesn't need to see these markers as filtering is hardcoded
+        cleaned_guidelines = self._remove_note_types_marker(subsection_guidelines)
+
+        # STEP 3: Fetch facts with LLM using JSON output
+        
+        parsing_prompt = f"""
+Du er en ekspert i at analysere medicinske retningslinjer.
+
+SEKTION: {section_title}
+UNDERAFSNIT: {subsection_title}
+
+RETNINGSLINJER:
+{cleaned_guidelines}
+
+Din opgave er at identificere hvilke KONKRETE FAKTA der skal findes i patientjournalen, 
+samt udtrække SPECIFIKKE FORMAT-INSTRUKTIONER for dette underafsnit.
+
+VIGTIGT - Håndter følgende:
+1. Hvis retningslinjen siger "Hvis ja...", udtræk BEGGE muligheder (ja og nej scenarios)
+2. Når der står "Brug X notat", betyder det der skal søge i den notetype
+3. FORMAT KRAV skal indeholde instruktioner om HVORDAN der skal svares (f.eks. "besvar kort", "pas på ikke at konkludere", "giv bedste bud")
+4. Lister med "f.eks." betyder ALLE eksemplerne er potentielle fakta
+5. Når du laver "search_query", skal du optimere søgestrengen til RAG:
+   - Brug præcise og beskrivende nøgleord
+   - Undgå generiske ord (som “patienten”, “hvis”, “skal”)
+   - Medtag synonymer og fagtermer fra konteksten
+   - Sørg for at søgestrengen fungerer for både semantisk og nøgleordsbaseret søgning
+
+## OUTPUT FORMAT - DU SKAL RETURNERE JSON ##
+
+Returner KUN et JSON objekt med denne struktur (ingen tekst før eller efter):
+
+{{
+  "required_facts": [
+    {{
+      "description": "Præcis beskrivelse af faktum",
+      "search_query": "optimeret søgestreng for RAG"
+    }}
+  ],
+  "format_instructions": "Alle instruktioner om HVORDAN der skal svares for dette underafsnit"
+}}
+
+## EKSEMPEL ##
+
+For retningslinje: 
+"Får patienten behov for medicindosering? Hvis ja: tabletter, øjendråber? Brug hjemmesygepleje notat. Svar meget kort og pas på ikke at konkludere."
+
+Korrekt JSON:
+{{
+  "required_facts": [
+    {{
+      "description": "Behov for hjælp til medicindosering (ja/nej)",
+      "search_query": "medicindosering hjælp behov"
+    }},
+    {{
+      "description": "Type medicindosering: tabletter, øjendråber, salve, injektion",
+      "search_query": "medicin tabletter øjendråber administration"
+    }}
+  ],
+  "format_instructions": "Svar meget kort. Pas på ikke at konkludere. Giv bedste bud baseret på patientens tilstand."
+}}
+
+Vær SPECIFIK. Inkluder ALLE detaljer fra retningslinjen, også "hvis ja" scenarios.
+Returner KUN valid JSON - ingen forklaring før eller efter!
+"""
+        
         try:
             # Call LLM with retry logic
             response = safe_llm_invoke(
