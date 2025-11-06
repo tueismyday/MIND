@@ -81,13 +81,16 @@ This is the core generation pipeline with three phases:
 ##### **PHASE 1: Fact Parsing**
 **Location:** `generation/fact_parser.py` → `GuidelineFactParser`
 
-1. Extracts NOTE_TYPES from guidelines (e.g., `[NOTE_TYPES: Hjemmesygepleje, Observationer]`)
+1. Extracts NOTE_TYPES from guidelines:
+   - Format: `[NOTE_TYPES: type1, type2]` (specific types) or `[NOTE_TYPES: ALL]` (no filtering)
+   - Examples: `[NOTE_TYPES: Hjemmesygepleje, Observationer]`
+   - Used to filter patient records during RAG retrieval
 2. Analyzes guideline text using LLM to identify required facts
 3. For each guideline requirement, creates a `RequiredFact` with:
    - `description`: What information to find
    - `search_query`: Optimized RAG query
-   - `note_types`: Allowed note types for filtering
-4. Extracts format instructions (e.g., "Svar kort", "Pas på ikke at konkludere")
+   - `note_types`: Allowed note types for filtering (extracted from step 1)
+4. Extracts format instructions (e.g., "Svar kort", "Pas på ikke at konkludere", "Max 60 words")
 
 **Example:**
 ```
@@ -106,25 +109,44 @@ Guideline: "Får patienten behov for medicindosering? Hvis ja: tabletter, øjend
 For each required fact:
 
 1. **RAG Retrieval** (`tools/patient_tools.py` → `get_patient_info_with_sources`)
-   - Searches patient EHR vector database
-   - Filters by note types if specified
-   - Retrieves top-k most relevant sources with metadata
-   - Returns: `{patient_info: str, sources: [dict]}`
+   - Searches patient EHR vector database using two-stage RRF hybrid search
+   - Filters by note types if specified in guidelines (`[NOTE_TYPES: type1, type2]` or `[NOTE_TYPES: ALL]`)
+   - Retrieves top-k most relevant sources (max 5 per fact, configurable)
+   - Returns rich metadata including:
+     - **Relevance**: Percentage score (0-100%)
+     - **RRF scores**: Normalized (0-100), raw value, semantic/keyword ranks
+     - **Cross-encoder score**: 0-90 scale
+     - **Recency boost**: 0-10 scale (exponential decay from most recent DB entry)
+     - **Timestamp** and **entry_type** (note type)
+     - Full content and snippet
+   - Fallback strategy: RRF → Lightweight hybrid → Pure Chroma semantic search
 
 2. **Answer Generation**
-   - LLM answers the specific fact using retrieved sources
+   - Facts are processed using **batched LLM calls** for efficiency
+   - LLM answers each fact using retrieved sources
    - Determines if fact is answerable from available data
+   - Generates answer with source citations: `[Kilde: NoteType - DD.MM.YYYY]`
    - Returns: `(answer_text, is_answerable)`
 
 3. **Validation** (Optional - if `enable_validation=True`)
    - **Stage 1: Fact-checking** - Validates answer against patient sources
+     - Checks factual correctness
+     - Verifies source citations are accurate
+     - Ensures newest information is used
    - **Stage 2: Guideline adherence** - Ensures format compliance
-   - Corrects errors and tracks revisions
-   - Max validation cycles: configurable (default: 2)
+     - Checks if answer follows format instructions
+     - Validates structure and style requirements
+   - Corrects errors and tracks revisions (fact-check vs guideline revisions)
+   - Max validation cycles: configurable (default: 2, min: 1, max: 3)
+   - Tracks validation history for quality metrics
 
 4. **Source Tracking**
    - Records all sources used for this fact
-   - Includes metadata: entry_type, timestamp, relevance score
+   - Includes comprehensive metadata:
+     - `entry_type` (note type), `timestamp`, `relevance` percentage
+     - RRF scores (normalized, raw, semantic/keyword ranks)
+     - Cross-encoder score and recency boost
+     - Full content and snippet
 
 ##### **PHASE 3: Subsection Assembly**
 **Location:** `generation/fact_based_generator.py` → `assemble_subsection_from_facts()`
@@ -146,30 +168,40 @@ For each required fact:
 2. Extracts final section text using `extract_final_section()`
 3. Assembles final document structure
 
-**Optional appendices (if enabled):**
+**Optional appendices (saved separately to `/reports/{base_name}_appendices.txt`):**
 
 #### Reference Appendix
 If `include_references=True`:
 - Groups sources by entry_type (note type)
 - Sorts by timestamp (newest first)
-- Shows relevance scores and snippets
-- Format:
+- Shows comprehensive RRF metadata:
+  - Relevance percentage
+  - RRF scores (normalized, raw, semantic/keyword ranks)
+  - Cross-encoder score and recency boost
+  - Content snippets
+- Saved as separate text file for detailed analysis
+- Format example:
   ```
   ═══════════════════════════════════════
   KILDEHENVISNINGER OG DOKUMENTATION
   ═══════════════════════════════════════
 
   ### HJEMMESYGEPLEJE (15 kilder)
-  • 15.03.2024 (Relevans: 95%)
-    Uddrag: "Patient modtager hjælp til medicindosering..."
+  ## [1] Hjemmesygepleje (15.03.2024)
+  *Total: 45.3/40 | CE: 30.5/30 | Recency: 14.8/10 | [RRF Filter: 75.2/100]*
+  *Sem: #3 | Key: #5 | Relevans: 92%*
+  Uddrag: "Patient modtager hjælp til medicindosering..."
   ```
 
 #### Validation Report
 If `enable_validation=True`:
 - Overall statistics (total subsections, validation cycles, revisions)
-- Two-stage breakdown (fact-check vs guideline revisions)
+- Two-stage breakdown:
+  - **Fact-check revisions**: Count of fact-checking corrections
+  - **Guideline revisions**: Count of format/adherence corrections
 - Section-by-section quality metrics
-- Documents which subsections required corrections
+- Documents which subsections required corrections and why
+- Saved to separate appendices file for quality assurance
 
 ### Phase 5: PDF Generation
 
@@ -317,23 +349,34 @@ If `enable_validation=True`:
 │    generation/fact_based_generator.py                       │
 │                                                              │
 │    6a. RAG RETRIEVAL                                        │
-│        tools/patient_tools.py                               │
-│        • Search patient EHR vector DB                       │
-│        • Filter by note types                               │
-│        • Return sources with metadata                       │
+│        tools/patient_tools.py (RRFPatientRetriever)         │
+│        • Two-stage RRF hybrid search:                       │
+│          - Stage 1: RRF filtering (semantic + BM25)         │
+│          - Stage 2: Cross-encoder + recency ranking         │
+│        • Filter by NOTE_TYPES if specified                  │
+│        • Return max 5 sources with rich metadata            │
 │                                                              │
 │    6b. LLM ANSWER GENERATION                                │
+│        • Batched LLM calls for efficiency                   │
 │        • LLM answers fact using sources                     │
 │        • Determine answerability                            │
+│        • Generate citations: [Kilde: Type - Date]          │
 │                                                              │
 │    6c. VALIDATION (if enabled)                              │
 │        generation/fact_validator.py                         │
 │        • Stage 1: Fact-check against patient data          │
+│          - Check factual correctness                        │
+│          - Verify source citations                          │
+│          - Ensure newest information used                   │
 │        • Stage 2: Guideline adherence check                │
+│          - Validate format compliance                       │
 │        • Apply corrections, track revisions                 │
+│        • Max cycles: 2 (default), range: 1-3               │
 │                                                              │
 │    6d. SOURCE TRACKING                                      │
-│        • Record sources with metadata                       │
+│        • Record sources with comprehensive metadata:        │
+│          - Relevance %, RRF scores, CE score, recency      │
+│          - Entry type, timestamp, content                   │
 └────────────────────┬────────────────────────────────────────┘
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -365,9 +408,11 @@ If `enable_validation=True`:
 │ 9. DOCUMENT ASSEMBLY                                        │
 │    generation/document_generator.py                         │
 │    • Combine all sections                                   │
-│    • Add reference appendix (if enabled)                    │
-│    • Add validation report (if enabled)                     │
 │    • Generate final document text                           │
+│    • Save appendices separately (if enabled):               │
+│      - Reference appendix with RRF metadata                 │
+│      - Validation report with quality metrics               │
+│      → reports/{base_name}_appendices.txt                  │
 └────────────────────┬────────────────────────────────────────┘
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -391,10 +436,16 @@ If `enable_validation=True`:
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ 12. STATISTICS & REPORTING                                  │
-│     • Print source statistics                               │
-│     • Print quality metrics                                 │
-│     • Generate validation report PDF                        │
-│     • Output: {document_name}.pdf + validation_report.pdf  │
+│     • Print source statistics:                              │
+│       - Total/unique sources, avg relevance                 │
+│       - High relevance sources (≥80%)                       │
+│       - Type distribution                                   │
+│     • Print quality metrics (if validation enabled):        │
+│       - Validation cycles, revisions (fact-check vs guide)  │
+│       - Sections with revisions                             │
+│     • Output files:                                         │
+│       - generated_documents/{name}.pdf (main document)      │
+│       - reports/{name}_appendices.txt (if enabled)         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -404,8 +455,18 @@ If `enable_validation=True`:
 - **Guideline DB**: ChromaDB vector database with hospital guidelines
 - **Patient EHR DB**: ChromaDB vector database with patient records
 - **Embeddings**: Qwen3-Embedding-0.6B for semantic search (configurable CPU/GPU)
-- **Reranker**: Qwen3-Reranker-0.6B for relevance scoring (configurable CPU/GPU)
-- **Search**: RRF (Reciprocal Rank Fusion) for hybrid retrieval
+- **Reranker**: Qwen3-Reranker-0.6B (cross-encoder) for relevance scoring (configurable CPU/GPU)
+- **Search**: Two-stage hybrid retrieval system
+  - **Stage 1 (Filtering)**: RRF (Reciprocal Rank Fusion) combines semantic + BM25 keyword search
+    - Semantic search via embedding model
+    - BM25 keyword matching with Danish stopwords
+    - RRF fusion formula: `Σ (1 / (k + rank))` where k=60
+    - Normalized to 0-100 scale for filtering
+  - **Stage 2 (Ranking)**: Fresh scoring with cross-encoder + recency
+    - Cross-encoder neural relevance: 0-90 scale
+    - Recency boost (exponential decay): 0-10 scale
+    - Final score = Cross-encoder + Recency (max 100)
+  - **Fallback chain**: RRF → Lightweight hybrid → Pure Chroma semantic search
 
 ### LLM Configuration
 - **Generation**: Configurable LLM (vLLM with Qwen3-30B, GPT-4, Claude, etc.)
@@ -425,6 +486,47 @@ export RERANKER_DEVICE_MODE=auto    # or "cpu", "cuda"
 ```
 
 For detailed GPU configuration and vLLM setup, see [GPU Setup Guide](docs/GPU_SETUP.md).
+
+### Key Configuration Parameters
+
+**RRF/Hybrid Search** (`config/settings.py`):
+```python
+EMBEDDING_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
+RERANKER_MODEL_NAME = "Qwen/Qwen3-Reranker-0.6B"
+EMBEDDING_DEVICE_MODE = 'cpu'              # or 'auto', 'cuda'
+RERANKER_DEVICE_MODE = 'cpu'               # or 'auto', 'cuda'
+INITIAL_RETRIEVAL_K = 20                   # Initial RRF candidates
+FINAL_RETRIEVAL_K = 10                     # After cross-encoder reranking
+SIMILARITY_SCORE_THRESHOLD = 0.5           # Minimum relevance threshold
+BATCH_SIZE_RERANK = 1                      # Cross-encoder batch size
+```
+
+**Generation** (`config/settings.py`):
+```python
+MAX_SOURCES_PER_FACT = 5                   # Max patient sources per fact
+USE_HYBRID_MULTI_FACT_APPROACH = True      # Enable fact-based generation
+```
+
+**Validation** (`config/settings.py`):
+```python
+DEFAULT_VALIDATION_CYCLES = 2              # Default per subsection
+MAX_VALIDATION_CYCLES = 3                  # Hard limit
+MIN_VALIDATION_CYCLES = 1                  # Minimum
+ENABLE_SUBSECTION_VALIDATION = True        # Can be toggled
+```
+
+**LLM Configuration** (`config/llm_config.py`):
+```python
+VLLM_MODE = 'server'                       # or 'local'
+TEMPERATURE = 0.2                          # Generation temperature
+TOP_P = 0.95                               # Nucleus sampling
+```
+
+**Reference Settings** (`config/reference_settings.py`):
+- `none`: No references
+- `minimal`: 1 reference per section
+- `balanced`: 3 references per section (default)
+- `detailed`: 5 references per section
 
 ### Quality Assurance
 - **Two-stage validation**:
@@ -447,7 +549,8 @@ MIND/
 ├── core/
 │   ├── database.py                  # Vector DB management
 │   ├── memory.py                    # Session memory
-│   └── embeddings.py                # Embedding functions
+│   ├── embeddings.py                # Embedding functions
+│   └── reranker.py                  # Cross-encoder reranker
 ├── generation/
 │   ├── document_generator.py        # Main document orchestration
 │   ├── section_generator.py         # Section/subsection generation
@@ -456,7 +559,8 @@ MIND/
 │   └── fact_validator.py            # Two-stage validation
 ├── tools/
 │   ├── guideline_tools.py           # Guideline retrieval
-│   └── patient_tools.py             # Patient EHR retrieval
+│   ├── patient_tools.py             # Patient EHR retrieval (RRF)
+│   └── hybrid_search.py             # Two-stage RRF hybrid search
 ├── utils/
 │   ├── pdf_utils.py                 # PDF generation & formatting
 │   ├── text_processing.py           # Text parsing & assembly
@@ -470,7 +574,8 @@ MIND/
 │   ├── guidelines_db/               # Guideline vector DB
 │   ├── patient_db/                  # Patient EHR vector DB
 │   └── generated_documents_db/      # Generated docs vector DB
-└── generated_documents/             # Output PDFs
+├── generated_documents/             # Output PDFs
+└── reports/                         # Appendices and validation reports
 ```
 
 ## Example Usage
@@ -503,14 +608,26 @@ python generate_document_direct.py \
 ## Output
 
 Each generation produces:
-1. **Main document PDF**: Professional medical document with citations
-2. **Validation report PDF**: Quality assurance documentation (if validation enabled)
-3. **Console statistics**: Source counts, validation metrics, quality scores
+1. **Main document PDF** (`generated_documents/{document_name}.pdf`):
+   - Professional medical document with citations
+   - Structured sections and subsections
+   - Inline superscript citations `[1]`
+   - Footnotes with source references (NoteType - Date)
+   - Highlighted warning boxes for unanswerable items
 
-The generated PDFs include:
-- Structured sections and subsections
-- Inline superscript citations `[1]`
-- Footnotes with source references
-- Highlighted warning boxes for unanswerable items
-- Optional reference appendix with detailed source information
-- Optional validation appendix with quality metrics
+2. **Appendices file** (`reports/{document_name}_appendices.txt`) - if references or validation enabled:
+   - **Reference appendix**: Detailed source information with RRF metadata
+     - Relevance percentages, RRF scores, cross-encoder scores, recency boosts
+     - Grouped by entry type (note type)
+     - Sorted by timestamp (newest first)
+   - **Validation appendix**: Quality assurance documentation
+     - Overall statistics (validation cycles, revisions)
+     - Two-stage breakdown (fact-check vs guideline revisions)
+     - Section-by-section quality metrics
+
+3. **Console statistics**:
+   - Source counts and types
+   - Average relevance scores
+   - High relevance sources (≥80%)
+   - Validation metrics (if enabled)
+   - Quality scores and revision counts
