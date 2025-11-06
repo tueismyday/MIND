@@ -107,7 +107,7 @@ class PatientInfoResult:
         if self.search_method != "rrf" or not self.rrf_details:
             return "RRF analyse ikke tilgængelig."
         
-        analysis = "ðŸ“Š **RRF (Reciprocal Rank Fusion) Analyse:**\n"
+        analysis = "**RRF (Reciprocal Rank Fusion) Analyse:**\n"
         analysis += f"- Smoothing konstant (k): {self.rrf_details.get('k', 60)}\n"
         analysis += f"- Rank vindue: {self.rrf_details.get('rank_window', 100)}\n"
         analysis += f"- Antal resultater fusioneret: {len(self.sources)}\n\n"
@@ -199,11 +199,11 @@ class RRFPatientRetriever:
         """
         
         if self.use_rrf_search and self.rrf_retriever:
-            return self._retrieve_with_rrf_search(query, max_references, rank_window, enable_rrf_explanation)
+            return self._retrieve_with_rrf_search(query, max_references, rank_window, enable_rrf_explanation, note_types)
         elif self.fallback_retriever:
             return self._retrieve_with_hybrid_fallback(query, max_references)
         else:
-            return self._retrieve_with_chroma(query, initial_k, final_k, max_references)
+            return self._retrieve_with_chroma(query, initial_k, final_k, max_references, note_types)
     
     def _retrieve_with_rrf_search(self, query: str, max_references: int, 
                                 rank_window: int, enable_explanation: bool,
@@ -211,12 +211,14 @@ class RRFPatientRetriever:
         """Retrieve using RRF hybrid search."""
         
         print(f"[INFO] Using RRF hybrid search (k={self.rrf_k}, window={rank_window})...")
+        if note_types:
+            print(f"[INFO] Filtering by note types: {note_types}")
         
         try:
             content, sources = self.rrf_retriever.retrieve_with_sources(
-                query, max_references, rank_window, enable_explanation
+                query, max_references, rank_window, enable_explanation, note_types=note_types
             )
-            
+                        
             rrf_details = {
                 'k': self.rrf_k,
                 'rank_window': rank_window,
@@ -402,32 +404,6 @@ def retrieve_patient_info(query: str, initial_k: int = INITIAL_RETRIEVAL_K,
     )
     return result.get_formatted_content()
 
-@tool
-def retrieve_patient_info_with_rrf_analysis(query: str, max_references: int = 3,
-                                           rrf_k: int = 60, rank_window: int = 100) -> str:
-    """
-    Retrieve patient information with detailed RRF analysis for debugging/optimization.
-    
-    Args:
-        query (str): Natural language query about the patient
-        max_references (int): Maximum number of source references
-        rrf_k (int): RRF smoothing constant
-        rank_window (int): RRF rank window size
-    
-    Returns:
-        str: Patient information with detailed RRF analysis
-    """
-    
-    retriever = get_patient_retriever(rrf_k)
-    result = retriever.retrieve_with_sources(
-        query, max_references=max_references, 
-        rank_window=rank_window, enable_rrf_explanation=True
-    )
-    
-    content = result.get_formatted_content()
-    analysis = result.get_rrf_analysis()
-    
-    return f"{content}\n\n{analysis}"
 
 def get_patient_info_with_sources(query: str, initial_k: int = INITIAL_RETRIEVAL_K,
                                 final_k: int = FINAL_RETRIEVAL_K,
