@@ -69,6 +69,29 @@ class GuidelineFactParser:
         print(f"[INFO] NOTE_TYPES extracted: {note_types}")
         return note_types if note_types else None
     
+    def _remove_note_types_marker(self, subsection_guidelines: str) -> str:
+        """
+        Remove [NOTE_TYPES: ...] markers from guideline text.
+        
+        These markers are used for hardcoded filtering and should not be sent to the LLM
+        as they might confuse the query generation process.
+        
+        Args:
+            subsection_guidelines: Guideline text with possible NOTE_TYPES markers
+            
+        Returns:
+            Cleaned guideline text without NOTE_TYPES markers
+        """
+        # Pattern: [NOTE_TYPES: type1, type2, type3] or [NOTE_TYPES: ALL]
+        pattern = r'\[NOTE_TYPES:\s*[^\]]+\]'
+        cleaned_text = re.sub(pattern, '', subsection_guidelines, flags=re.IGNORECASE)
+        
+        # Clean up any extra whitespace left behind
+        cleaned_text = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned_text)  # Multiple blank lines -> double
+        cleaned_text = cleaned_text.strip()
+        
+        return cleaned_text
+    
     def parse_subsection_requirements(self, 
                                      section_title: str,
                                      subsection_title: str,
@@ -87,10 +110,14 @@ class GuidelineFactParser:
         
         print(f"[INFO] Parsing requirements for '{subsection_title}'")
 
-        # STEP 1: Extract note types
+        # STEP 1: Extract note types (for hardcoded filtering)
         note_types = self._extract_note_types(subsection_guidelines)
 
-        # STEP 2: Fetch facts with LLM using JSON output
+        # STEP 2: Remove NOTE_TYPES markers from text before sending to LLM
+        # The LLM doesn't need to see these markers as filtering is hardcoded
+        cleaned_guidelines = self._remove_note_types_marker(subsection_guidelines)
+
+        # STEP 3: Fetch facts with LLM using JSON output
         
         parsing_prompt = f"""
 Du er en ekspert i at analysere medicinske retningslinjer.
@@ -99,9 +126,7 @@ SEKTION: {section_title}
 UNDERAFSNIT: {subsection_title}
 
 RETNINGSLINJER:
-{subsection_guidelines}
-
-{"VIGTIGT: Denne subsection skal KUN bruge følgende note-typer: " + ", ".join(note_types) if note_types else "NOTE: Alle note-typer er tilladt"}
+{cleaned_guidelines}
 
 Din opgave er at identificere hvilke KONKRETE FAKTA der skal findes i patientjournalen, 
 samt udtrække SPECIFIKKE FORMAT-INSTRUKTIONER for dette underafsnit.
