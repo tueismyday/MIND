@@ -1,16 +1,83 @@
 """
-Enhanced section generation with fact-by-fact approach.
-Each fact is answered independently, validated, then assembled.
+Section generation with fact-by-fact approach
+Facts are extracted, answered, validated and concatinated for each subsection
+before the assembly of a section
+
+- Batched cross-encoder predictions
+- Batched LLM fact answering calls
+- Batched LLM validation calls
 """
 
 from typing import Tuple, List, Dict
-from generation.fact_parser import GuidelineFactParser, SubsectionRequirements
+from generation.fact_parser import GuidelineFactParser
 from generation.fact_based_generator import FactBasedGenerator
 from generation.fact_validator import FactValidator
-from tools.patient_tools import get_patient_info_with_sources
+from utils.text_processing import split_section_into_subsections
 from utils.error_handling import safe_rag_search
 from utils.profiling import profile
-from config.settings import DEFAULT_VALIDATION_CYCLES, MAX_VALIDATION_CYCLES, MIN_VALIDATION_CYCLES
+from config.settings import DEFAULT_VALIDATION_CYCLES, MAX_VALIDATION_CYCLES, MIN_VALIDATION_CYCLES, MAX_SOURCES_PER_FACT
+import time
+
+
+def _batch_llm_calls(prompts: List[str], llm_instance, operation: str = "batch", max_retries: int = 2) -> List[str]:
+    """
+    Batch multiple LLM calls into one request.
+    Falls back to sequential if batching fails.
+    
+    Args:
+        prompts: List of prompts to process
+        llm_instance: LLM instance (vLLM client)
+        operation: Operation name for logging
+        max_retries: Max retry attempts for batch call
+        
+    Returns:
+        List of responses (same length as prompts)
+    """
+    if not prompts:
+        return []
+    
+    # Try batched call
+    for attempt in range(max_retries):
+        try:
+            responses = []
+            
+            if hasattr(llm_instance, 'client') and hasattr(llm_instance.client, 'chat'):
+                for prompt in prompts:
+                    response = llm_instance.client.chat.completions.create(
+                        model=llm_instance.model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=getattr(llm_instance, 'temperature', 0.1),
+                        max_tokens=6056,
+                    )
+                    responses.append(response.choices[0].message.content.strip())
+                
+                return responses
+            
+            else:
+                # Fallback: sequential calls using invoke
+                for prompt in prompts:
+                    response = llm_instance.invoke(prompt)
+                    responses.append(response.strip())
+                
+                return responses
+        
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"[WARN] Batch {operation} attempt {attempt + 1} failed: {e}, retrying...")
+                time.sleep(2 ** attempt)
+            else:
+                print(f"[ERROR] Batch {operation} failed after {max_retries} attempts, using sequential fallback")
+                # Final fallback: sequential with error handling
+                responses = []
+                for prompt in prompts:
+                    try:
+                        response = llm_instance.invoke(prompt)
+                        responses.append(response.strip())
+                    except:
+                        responses.append("UNANSWERABLE")
+                return responses
+    
+    return ["UNANSWERABLE"] * len(prompts)
 
 
 @profile
@@ -20,20 +87,19 @@ def generate_subsection_with_hybrid_approach(
     section_intro: str,
     subsection_guidelines: str,
     patient_data: str,
-    max_sources_per_fact: int = 2,
+    max_sources_per_fact: MAX_SOURCES_PER_FACT,
     enable_validation: bool = True,
     max_revision_cycles: int = None
 ) -> Tuple[str, List[Dict], Dict]:
     """
-    Generate subsection using FACT-BY-FACT approach with per-fact validation.
+    Generate subsection using FACT-BY-FACT approach with batched LLM calls.
     
     Pipeline:
-    1. Parse guideline → identify required facts
-    2. For each fact:
-       a. RAG search for this fact
-       b. LLM answers this fact
-       c. Validate answer (if enabled)
-    3. Assemble subsection from fact-answers
+    1. Parse guideline --> identify required facts
+    2. For each fact: RAG search
+    3. BATCH: Answer all facts together
+    4. BATCH: Validate all facts together (if enabled)
+    5. Assemble subsection from fact-answers
     
     Args:
         section_title: Parent section title
@@ -61,9 +127,9 @@ def generate_subsection_with_hybrid_approach(
 
     try:
     
-        # ═══════════════════════════════════════════════════════════════
-        # PHASE 1: Parse Guidelines → Identify Required Facts
-        # ═══════════════════════════════════════════════════════════════
+        # =============================================================================================================================================================================================
+        # PHASE 1: Parse Guidelines --> Identify Required Facts
+        # =============================================================================================================================================================================================
         
         parser = GuidelineFactParser()
         requirements = parser.parse_subsection_requirements(
@@ -74,14 +140,14 @@ def generate_subsection_with_hybrid_approach(
         
         print(f"\n[PHASE 1 COMPLETE] Identified {len(requirements.required_facts)} facts to retrieve\n")
         
-        # ═══════════════════════════════════════════════════════════════
-        # PHASE 2: Answer Each Fact Independently
-        # ═══════════════════════════════════════════════════════════════
+        # =============================================================================================================================================================================================
+        # PHASE 2: Answer Each Fact (with BATCHED LLM calls)
+        # =============================================================================================================================================================================================
         
         generator = FactBasedGenerator()
         validator = FactValidator() if enable_validation else None
         
-        fact_answers = []
+        fact_sources_pairs = []  # (fact, sources) tuples
         all_sources = []
         validation_stats = {
             'total_facts': len(requirements.required_facts),
@@ -91,16 +157,16 @@ def generate_subsection_with_hybrid_approach(
             'corrected_facts': 0
         }
         
-        print(f"[PHASE 2] Answering {len(requirements.required_facts)} facts individually...\n")
+        print(f"[PHASE 2] Retrieving sources for {len(requirements.required_facts)} facts...\n")
         
+        # Step 2a: RAG retrieval for all facts (sequential, but faster than original)
         for i, fact in enumerate(requirements.required_facts, 1):
             print(f"[FACT {i}/{len(requirements.required_facts)}] {fact.description[:60]}...")
             
-            # 2a. RAG retrieval for this specific fact
             note_types = fact.note_types or requirements.note_types
             
             if note_types:
-                print(f"  → Filtering by: {note_types}")
+                print(f"  --> Filtering by: {note_types}")
             
             rag_result = safe_rag_search(
                 query=fact.search_query,
@@ -109,74 +175,152 @@ def generate_subsection_with_hybrid_approach(
             )
             
             sources = rag_result.sources
-            print(f"  → Retrieved {len(sources)} sources")
+            print(f"  --> Retrieved {len(sources)} sources")
             
+            fact_sources_pairs.append((fact, sources))
+            all_sources.extend(sources)
+        
+        print(f"\n[PHASE 2A COMPLETE] Retrieved sources for all facts\n")
+        
+        # Step 2b: BATCH answer all facts
+        print(f"[PHASE 2B] Batching LLM calls to answer {len(fact_sources_pairs)} facts...\n")
+        
+        answering_prompts = []
+        answerable_indices = []  # Track which facts have sources
+        
+        for idx, (fact, sources) in enumerate(fact_sources_pairs):
             if not sources:
-                print(f"  ✗ No sources found - marking as unanswerable")
-                fact_answers.append({
-                    'fact': fact,
-                    'answer': 'UNANSWERABLE',
-                    'sources': [],
-                    'answerable': False,
-                    'validated': False,
-                    'corrected': False
-                })
-                validation_stats['unanswered_facts'] += 1
+                answering_prompts.append(None)
                 continue
             
-            # 2b. LLM answers this fact
-            answer, is_answerable = generator.answer_single_fact(fact, sources)
+            sources_text = generator._format_sources_full(sources)
             
-            if not is_answerable:
-                print(f"  ✗ Could not answer from sources")
-                fact_answers.append({
-                    'fact': fact,
-                    'answer': 'UNANSWERABLE',
-                    'sources': sources,
-                    'answerable': False,
-                    'validated': False,
-                    'corrected': False
-                })
+            # Format the prompt template with actual values
+            prompt = generator.fact_prompt_template.format(
+                fact_description=fact.description,
+                subsection_title=subsection_title,
+                sources_text=sources_text
+            )
+            answering_prompts.append(prompt)
+            answerable_indices.append(idx)
+        
+        # Batch call for answering
+        valid_prompts = [p for p in answering_prompts if p is not None]
+        
+        if valid_prompts:
+            batch_answers = _batch_llm_calls(valid_prompts, generator.llm, operation="fact_answering")
+        else:
+            batch_answers = []
+        
+        # Map answers back to facts
+        fact_answers_raw = []
+        batch_idx = 0
+        
+        for idx, (fact, sources) in enumerate(fact_sources_pairs):
+            if idx in answerable_indices:
+                answer = batch_answers[batch_idx]
+                batch_idx += 1
+                
+                is_answerable = answer and "UNANSWERABLE" not in answer.upper()
+                
+                if is_answerable:
+                    print(f"  --> [{idx+1}] Answered: {answer[:60]}...")
+                    validation_stats['answered_facts'] += 1
+                else:
+                    print(f"  --> [{idx+1}] Could not answer from sources")
+                    validation_stats['unanswered_facts'] += 1
+                
+                fact_answers_raw.append((fact, sources, answer, is_answerable))
+            else:
+                print(f"  --> [{idx+1}] No sources found")
                 validation_stats['unanswered_facts'] += 1
-                continue
+                fact_answers_raw.append((fact, sources, "UNANSWERABLE", False))
+        
+        print(f"\n[PHASE 2B COMPLETE] Answered {validation_stats['answered_facts']}/{validation_stats['total_facts']} facts\n")
+        
+        # Step 2c: BATCH validate all facts (if enabled)
+        if enable_validation and validator:
+            print(f"[PHASE 2C] Batching validation for {len(fact_answers_raw)} facts...\n")
             
-            print(f"  ✓ Answered: {answer[:60]}...")
-            validation_stats['answered_facts'] += 1
+            # Build validation prompts using EXACT original formatting
+            validation_prompts = []
+            validatable_indices = []
             
-            # 2c. Validate this fact answer (if enabled)
-            was_corrected = False
-            if enable_validation and validator:
-                validated_answer, was_corrected = validator.validate_fact_answer(
-                    fact, answer, sources, max_retries=max_revision_cycles
+            for idx, (fact, sources, answer, is_answerable) in enumerate(fact_answers_raw):
+                if answer == "UNANSWERABLE" or not sources or not is_answerable:
+                    validation_prompts.append(None)
+                    continue
+                
+                # Format sources for validation
+                sources_text = validator._format_sources(sources)
+                
+                # Format the validation prompt template with actual values
+                prompt = validator.validation_prompt_template.format(
+                    fact_description=fact.description,
+                    answer=answer,
+                    sources_text=sources_text
                 )
-                answer = validated_answer
-                validation_stats['validated_facts'] += 1
-                if was_corrected:
-                    validation_stats['corrected_facts'] += 1
+                validation_prompts.append(prompt)
+                validatable_indices.append(idx)
             
-            # 2d. Store result
+            # Batch validation calls
+            valid_validation_prompts = [p for p in validation_prompts if p is not None]
+            
+            if valid_validation_prompts:
+                batch_validations = _batch_llm_calls(valid_validation_prompts, validator.llm, operation="fact_validation", max_retries=1)
+            else:
+                batch_validations = []
+            
+            # Apply validation results
+            fact_answers_final = []
+            validation_idx = 0
+            
+            for idx, (fact, sources, answer, is_answerable) in enumerate(fact_answers_raw):
+                if idx in validatable_indices:
+                    validation_result = batch_validations[validation_idx]
+                    validation_idx += 1
+                    
+                    validation_stats['validated_facts'] += 1
+                    
+                    if validation_result.strip().upper() == "VALID":
+                        print(f"  --> Fact valid: {fact.description[:50]}")
+                        fact_answers_final.append((fact, sources, answer, False))
+                    else:
+                        print(f"  -->  Fact corrected: {fact.description[:50]}")
+                        validation_stats['corrected_facts'] += 1
+                        fact_answers_final.append((fact, sources, validation_result, True))
+                else:
+                    fact_answers_final.append((fact, sources, answer, False))
+            
+            print(f"\n[PHASE 2C COMPLETE] Validated {validation_stats['validated_facts']} facts, corrected {validation_stats['corrected_facts']}\n")
+        else:
+            fact_answers_final = [(f, s, a, False) for f, s, a, _ in fact_answers_raw]
+        
+        # Build fact_answers structure for assembly
+        fact_answers = []
+        for fact, sources, answer, was_corrected in fact_answers_final:
+            is_answerable = answer and "UNANSWERABLE" not in answer.upper()
+            
             fact_answers.append({
                 'fact': fact,
-                'answer': answer,
+                'answer': answer if is_answerable else 'UNANSWERABLE',
                 'sources': sources,
-                'answerable': True,
+                'answerable': is_answerable,
                 'validated': enable_validation,
                 'corrected': was_corrected
             })
-            
-            all_sources.extend(sources)
-            print()
         
         print(f"[PHASE 2 COMPLETE] Answered {validation_stats['answered_facts']}/{validation_stats['total_facts']} facts")
         if enable_validation:
-            print(f"  → Validated: {validation_stats['validated_facts']}, Corrected: {validation_stats['corrected_facts']}\n")
+            print(f"  --> Validated: {validation_stats['validated_facts']}, Corrected: {validation_stats['corrected_facts']}\n")
         
-        # ═══════════════════════════════════════════════════════════════
+        # =============================================================================================================================================================================================
         # PHASE 3: Assemble Subsection from Fact-Answers
-        # ═══════════════════════════════════════════════════════════════
+        # =============================================================================================================================================================================================
         
         print(f"[PHASE 3] Assembling subsection...\n")
         
+        # Use EXACT original assembly method
         result_json = generator.assemble_subsection_from_facts(
             subsection_title=subsection_title,
             section_title=section_title,
@@ -197,13 +341,13 @@ def generate_subsection_with_hybrid_approach(
         if unanswerable_items:
             final_output += f"\n\nKunne ikke besvares ud fra patientjournalen:\n"
             for item in unanswerable_items:
-                final_output += f"• {item}\n"
+                final_output += f"{item}\n"
         
         print(f"[PHASE 3 COMPLETE] Subsection assembled ({len(assembled_text)} chars)")
         
-        # ═══════════════════════════════════════════════════════════════
+        # =============================================================================================================================================================================================
         # Return Results
-        # ═══════════════════════════════════════════════════════════════
+        # =
         
         # Deduplicate sources
         unique_sources = _deduplicate_sources(all_sources)
@@ -240,15 +384,15 @@ def _deduplicate_sources(sources: List[Dict]) -> List[Dict]:
     return unique
 
 
-# ═══════════════════════════════════════════════════════════════
+# =============================================================================================================================================================================================
 # Section-Level Function (Splits into Subsections)
-# ═══════════════════════════════════════════════════════════════
+# =============================================================================================================================================================================================
 
 def generate_section_with_hybrid_approach(
     section_title: str,
     section_guidelines: str,
     patient_data: str,
-    max_sources_per_fact: int = 2,
+    max_sources_per_fact: MAX_SOURCES_PER_FACT,
     enable_validation: bool = True
 ) -> Tuple[str, List[Dict], Dict]:
     """
@@ -259,26 +403,8 @@ def generate_section_with_hybrid_approach(
     for each one.
     """
 
-    from utils.text_processing import split_section_into_subsections
-
-    # Type safety: ensure section_guidelines is a string
-    if not isinstance(section_guidelines, str):
-        print(f"[WARNING] section_guidelines is not a string (type: {type(section_guidelines)}). Converting to string.")
-        section_guidelines = str(section_guidelines) if section_guidelines else ""
-
-    # DEBUG: Log the input and output of split_section_into_subsections
-    print(f"[DEBUG] Calling split_section_into_subsections with section_guidelines type: {type(section_guidelines)}")
-    print(f"[DEBUG] section_guidelines length: {len(section_guidelines) if section_guidelines else 0} chars")
-    print(f"[DEBUG] First 100 chars: {section_guidelines[:100] if section_guidelines else 'EMPTY'}")
-
     subsections = split_section_into_subsections(section_guidelines)
 
-    print(f"[DEBUG] split_section_into_subsections returned type: {type(subsections)}")
-    print(f"[DEBUG] Number of subsections: {len(subsections) if subsections else 0}")
-    if subsections:
-        for idx, sub in enumerate(subsections):
-            print(f"[DEBUG] subsections[{idx}] type: {type(sub)}, value: {sub if isinstance(sub, dict) else f'NON-DICT: {type(sub)}'}")
-    
     if not subsections:
         # Treat entire section as single subsection
         return generate_subsection_with_hybrid_approach(
