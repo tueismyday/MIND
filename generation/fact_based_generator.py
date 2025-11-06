@@ -14,8 +14,61 @@ class FactBasedGenerator:
     
     def __init__(self):
         self.llm = llm_config.llm_generate
-    
-    def answer_single_fact(self, fact: RequiredFact, sources: List[Dict]) -> Tuple[str, bool]:
+        
+        # Template string - will be formatted later with actual values
+        self.fact_prompt_template = """
+        Du er en sygeplejerske der skal besvare ét specifikt faktum baseret på patientjournalen.
+        
+        FAKTUM AT BESVARE:
+        {fact_description}
+        
+        KILDER FRA PATIENTJOURNAL (fuld tekst):
+        {sources_text}
+        
+        DIN OPGAVE:
+        1. Besvar faktumet fra sektionen '{subsection_title}' kort og præcist PÅ DANSK
+        2. Du skal ikke finde på mulige sammenhænge mellem information fra patientjournal og det faktum du skal besvare. Det er KUN hvis informationen svarer direkte på dit spørgsmål, at informationen er klinisk relevant, så VÆR KRITISK!
+        3. Inkludér KUN information der er klinisk relevant og vigtig. Hvis noget er normalt/ukompliceret, nævn det kort eller spring over. Fokusér på det der kræver opmærksomhed eller opfølgning.
+        4. Tilføj kildehenvisning: [Kilde: "Notetype" - DD.MM.YYYY]
+        5. Hvis informationen IKKE findes i kilderne, skriv præcis: "UNANSWERABLE"
+        
+        EKSEMPEL PÅ GODT SVAR:
+        "Patienten har diabetes type 2 diagnosticeret i 2020 [Kilde: Lægenotat - 15.03.2024]."
+        
+        EKSEMPEL PÅ UNANSWERABLE:
+        "UNANSWERABLE"
+        
+        Skriv dit svar nu (kun svaret, ingen forklaring):"""
+        
+        # Template string - will be formatted later with actual values
+        self.assembly_prompt_template = """
+        Du er en sygeplejerske der skal sammensætte underafsnittet '{subsection_title}' under sektionen '{section_title}'.
+        
+        ## GENERELLE INSTRUKTIONER FOR HELE SEKTIONEN:
+        {section_intro}
+        VIGTIG: Disse instruktioner gælder for ALLE underafsnit i denne sektion
+        
+        ## SPECIFIKKE INSTRUKTIONER FOR DETTE UNDERAFSNIT:
+        {format_instructions}
+        
+        ## BESVAREDE FAKTA (med kildehenvisninger):
+        {combined_facts}
+        
+        DIN OPGAVE:
+        1. Skriv underafsnittet '{subsection_title}' som sammenhængende, naturlig tekst PÅ DANSK MED MAX 60 ORD, så vælg det vigtigste.
+        2. Følg BÅDE de generelle sektionsinstruktioner OG de specifikke underafsnit-instruktioner
+        3. Brug KUN relevant klinisk information og undgå gentagelser
+        4. Behold alle brugte kildehenvisninger [Kilde: Type - Dato] præcis som de er
+        5. Skriv IKKE underafsnit-titlen i din tekst
+        6. Vær kortfattet og præcis - brug IKKE fed skrift
+        7. Tilføj IKKE information der ikke er i de besvarede fakta
+        8. Lav "new-line" for hvert punktum du sætter
+        
+        Skriv kun den sammensatte tekst (ingen forklaring før eller efter):
+        """
+
+        
+    def answer_single_fact(self, fact: RequiredFact, section_title: str, sources: List[Dict]) -> Tuple[str, bool]:
         """
         Answer a single fact using its retrieved sources.
         
@@ -33,30 +86,12 @@ class FactBasedGenerator:
         # Format sources with FULL content
         sources_text = self._format_sources_full(sources)
         
-        prompt = f"""
-Du er en sygeplejerske der skal besvare ét specifikt faktum baseret på patientjournalen.
-
-FAKTUM AT BESVARE:
-{fact.description}
-
-KILDER FRA PATIENTJOURNAL (fuld tekst):
-{sources_text}
-
-DIN OPGAVE:
-1. Besvar faktumet kort og præcist PÅ DANSK
-2. Brug KUN information fra kilderne ovenfor
-3. Tilføj kildehenvisning: [Kilde: "Notetype" - DD.MM.YYYY]
-4. Brug ALTID den nyeste mest relevante information
-5. Hvis informationen IKKE findes i kilderne, skriv præcis: "UNANSWERABLE"
-
-EKSEMPEL PÅ GODT SVAR:
-"Patienten har diabetes type 2 diagnosticeret i 2020 [Kilde: Lægenotat - 15.03.2024]."
-
-EKSEMPEL PÅ UANSWERABLE:
-"UNANSWERABLE"
-
-Skriv dit svar nu (kun svaret, ingen forklaring):
-"""
+        # Format the prompt with actual values
+        prompt = self.fact_prompt_template.format(
+            fact_description=fact.description,
+            subsection_title=subsection_title,
+            sources_text=sources_text
+        )
         
         try:
             answer = safe_llm_invoke(prompt, self.llm, max_retries=2, operation="fact_answering")
@@ -108,31 +143,14 @@ Skriv dit svar nu (kun svaret, ingen forklaring):
         
         combined_facts = "\n".join(fact_texts)
         
-        # Assembly prompt to create cohesive text
-        assembly_prompt = f"""
-Du er en sygeplejerske der skal sammensætte underafsnittet '{subsection_title}' under sektionen '{section_title}'.
-
-## GENERELLE INSTRUKTIONER FOR HELE SEKTIONEN:
-{section_intro}
-VIGTIG: Disse instruktioner gælder for ALLE underafsnit i denne sektion
-
-## SPECIFIKKE INSTRUKTIONER FOR DETTE UNDERAFSNIT:
-{format_instructions if format_instructions else "Ingen yderligere specifikke instruktioner"}
-
-## BESVAREDE FAKTA (med kildehenvisninger):
-{combined_facts}
-
-DIN OPGAVE:
-1. Skriv underafsnittet '{subsection_title}' som sammenhængende, naturlig tekst PÅ DANSK
-2. Følg BÅDE de generelle sektionsinstruktioner OG de specifikke underafsnit-instruktioner
-3. Kombiner de besvarede fakta til flydende prosa men hold dit svar kort
-4. Behold ALLE kildehenvisninger [Kilde: Type - Dato] præcis som de er
-5. Skriv IKKE underafsnit-titlen i din tekst
-6. Vær kortfattet og præcis - brug IKKE fed skrift
-7. Tilføj IKKE information der ikke er i de besvarede fakta
-
-Skriv kun den sammensatte tekst (ingen forklaring før eller efter):
-"""
+        # Format the assembly prompt with actual values
+        assembly_prompt = self.assembly_prompt_template.format(
+            subsection_title=subsection_title,
+            section_title=section_title,
+            section_intro=section_intro,
+            format_instructions=format_instructions if format_instructions else "Ingen yderligere specifikke instruktioner",
+            combined_facts=combined_facts
+        )
         
         try:
             assembled_text = safe_llm_invoke(assembly_prompt, self.llm, max_retries=2, operation="fact_assembly")
