@@ -1,134 +1,167 @@
 """
-Configuration package for the Agentic RAG Medical Documentation System.
-Provides centralized access to settings, LLM configuration, and reference tracking.
+Configuration package for the MIND medical documentation system.
+
+Provides centralized, validated configuration management using Pydantic.
+All configuration can be overridden via environment variables (MIND_* prefix)
+or .env file.
+
+Quick Start:
+    >>> from config import get_settings
+    >>> settings = get_settings()
+    >>> settings.ensure_initialized()
+    >>> print(settings.get_summary())
+
+Module Structure:
+    - settings: Main MINDSettings aggregator with all subsystems
+    - paths: Directory and file path configuration
+    - models: ML model configuration (embeddings, reranker)
+    - retrieval: RAG and search parameter configuration
+    - generation: Document generation and LLM sampling configuration
+    - vllm: vLLM server/local mode configuration
+    - llm_config: LLM client management
+    - reference_settings: Reference tracking configuration
+    - exceptions: Custom exception classes
 """
 
-# Core settings
+# Main settings class and factory
 from .settings import (
-    # Directories
-    BASE_DIR,
-    DATA_DIR,
-    GUIDELINE_DIR,
-    PATIENT_RECORD_DIR,
-    GENERATED_DOCS_DIR,
-    GUIDELINE_DB_DIR,
-    PATIENT_DB_DIR,
-    GENERATED_DOCS_DB_DIR,
-    CACHE_DIR,
-    
-    # Model configuration
-    EMBEDDING_MODEL_NAME,
-    EMBEDDING_DEVICE,
-    
-    # Agent configuration
-    MAX_AGENT_ITERATIONS,
-    AGENT_EARLY_STOPPING_METHOD,
-    MEMORY_MAX_TOKEN_LIMIT,
-    CHAT_HISTORY_LIMIT,
-    
-    # Retrieval configuration
-    INITIAL_RETRIEVAL_K,
-    FINAL_RETRIEVAL_K,
-    SIMILARITY_SCORE_THRESHOLD,
-    GUIDELINE_SEARCH_K,
-    GENERATED_DOC_SEARCH_K,
-    PATIENT_SEARCH_K,
-    
-    # Generation configuration
-    GENERATION_TEMPERATURE,
-    CRITIQUE_TEMPERATURE,
-    
-    # Validation configuration
-    DEFAULT_VALIDATION_CYCLES,
-    MAX_VALIDATION_CYCLES,
-    MIN_VALIDATION_CYCLES,
-    
-    # Hybrid approach configuration
-    USE_HYBRID_MULTI_FACT_APPROACH,
-    FACT_COMPLEXITY_THRESHOLD,
-    MAX_SOURCES_PER_FACT,
-    
-    # PDF configuration
-    PDF_FONT_PATH,
-    DEFAULT_OUTPUT_NAME,
-    DEFAULT_PATIENT_FILE,
-
-    # Date formats
-    DATE_FORMATS,
-
-    # Utility functions
-    ensure_directories,
-    get_patient_file_path,
+    MINDSettings,
+    get_settings,
+    reload_settings,
 )
 
-# LLM configuration
+# Configuration subsystems
+from .paths import PathConfig, DATE_FORMATS
+from .models import ModelConfig, DeviceMode
+from .retrieval import RetrievalConfig
+from .generation import GenerationConfig
+from .vllm import VLLMConfig, VLLMMode
+
+# LLM client configuration
 from .llm_config import (
     LLMConfig,
     VLLMClient,
-    llm_config,  # Global instance
+    InPythonVLLMClient,
+    llm_config,
+    get_llm_config,
 )
 
-# Reference tracking configuration
+# Reference tracking
 from .reference_settings import (
-    # Default settings
-    DEFAULT_INCLUDE_REFERENCES,
-    DEFAULT_MAX_REFERENCES_PER_SECTION,
-    DEFAULT_SHOW_REFERENCE_STATISTICS,
-    
-    # Reference formats
-    REFERENCE_FORMAT_INLINE,
-    REFERENCE_FORMAT_DETAILED,
-    
-    # Quality thresholds
-    MIN_RELEVANCE_THRESHOLD,
-    PREFER_RECENT_SOURCES,
-    MAX_DAYS_OLD_PREFERRED,
-    
-    # Grouping settings
-    GROUP_REFERENCES_BY_TYPE,
-    DEDUPLICATE_SAME_TIMESTAMP,
-    MAX_REFERENCES_IN_APPENDIX,
-    
-    # Output formatting
-    INCLUDE_REFERENCE_APPENDIX,
-    INCLUDE_SOURCE_STATISTICS,
-    INCLUDE_QUALITY_INDICATORS,
-    
-    # Classes and functions
     ReferenceConfig,
-    reference_config,  # Global instance
+    reference_config,
+    ReferencePresetName,
     REFERENCE_PRESETS,
     get_preset_config,
     apply_preset,
+    # Constants for backward compatibility
+    DEFAULT_INCLUDE_REFERENCES,
+    DEFAULT_MAX_REFERENCES_PER_SECTION,
+    DEFAULT_SHOW_REFERENCE_STATISTICS,
+    REFERENCE_FORMAT_INLINE,
+    REFERENCE_FORMAT_DETAILED,
+    MIN_RELEVANCE_THRESHOLD,
+    PREFER_RECENT_SOURCES,
+    MAX_DAYS_OLD_PREFERRED,
+    GROUP_REFERENCES_BY_TYPE,
+    DEDUPLICATE_SAME_TIMESTAMP,
+    MAX_REFERENCES_IN_APPENDIX,
+    INCLUDE_REFERENCE_APPENDIX,
+    INCLUDE_SOURCE_STATISTICS,
+    INCLUDE_QUALITY_INDICATORS,
 )
 
+# Exceptions
+from .exceptions import (
+    ConfigurationError,
+    InvalidConfigValueError,
+    MissingRequiredConfigError,
+    InvalidPathError,
+    InvalidDeviceModeError,
+    VLLMConfigurationError,
+    ModelConfigurationError,
+)
+
+# For backward compatibility, provide easy access to module-level constants
+# These delegate to the settings instance
 __all__ = [
-    # Settings
-    'BASE_DIR', 'DATA_DIR', 'GUIDELINE_DIR', 'PATIENT_RECORD_DIR',
-    'GENERATED_DOCS_DIR', 'GUIDELINE_DB_DIR', 'PATIENT_DB_DIR',
-    'GENERATED_DOCS_DB_DIR', 'CACHE_DIR',
-    'EMBEDDING_MODEL_NAME', 'EMBEDDING_DEVICE',
-    'MAX_AGENT_ITERATIONS', 'AGENT_EARLY_STOPPING_METHOD',
-    'MEMORY_MAX_TOKEN_LIMIT', 'CHAT_HISTORY_LIMIT',
-    'INITIAL_RETRIEVAL_K', 'FINAL_RETRIEVAL_K', 'SIMILARITY_SCORE_THRESHOLD',
-    'GUIDELINE_SEARCH_K', 'GENERATED_DOC_SEARCH_K', 'PATIENT_SEARCH_K',
-    'GENERATION_TEMPERATURE', 'CRITIQUE_TEMPERATURE',
-    'DEFAULT_VALIDATION_CYCLES', 'MAX_VALIDATION_CYCLES', 'MIN_VALIDATION_CYCLES',
-    'USE_HYBRID_MULTI_FACT_APPROACH', 'FACT_COMPLEXITY_THRESHOLD', 'MAX_SOURCES_PER_FACT',
-    'PDF_FONT_PATH', 'DEFAULT_OUTPUT_NAME', 'DEFAULT_PATIENT_FILE',
+    # Main settings
+    'MINDSettings',
+    'get_settings',
+    'reload_settings',
+
+    # Configuration subsystems
+    'PathConfig',
+    'ModelConfig',
+    'RetrievalConfig',
+    'GenerationConfig',
+    'VLLMConfig',
+
+    # LLM configuration
+    'LLMConfig',
+    'VLLMClient',
+    'InPythonVLLMClient',
+    'llm_config',
+    'get_llm_config',
+
+    # Reference configuration
+    'ReferenceConfig',
+    'reference_config',
+    'ReferencePresetName',
+    'REFERENCE_PRESETS',
+    'get_preset_config',
+    'apply_preset',
+
+    # Type aliases
+    'DeviceMode',
+    'VLLMMode',
+
+    # Constants
     'DATE_FORMATS',
-    'ensure_directories', 'get_patient_file_path',
-    
-    # LLM
-    'LLMConfig', 'VLLMClient', 'llm_config',
-    
-    # References
-    'DEFAULT_INCLUDE_REFERENCES', 'DEFAULT_MAX_REFERENCES_PER_SECTION',
+
+    # Reference constants
+    'DEFAULT_INCLUDE_REFERENCES',
+    'DEFAULT_MAX_REFERENCES_PER_SECTION',
     'DEFAULT_SHOW_REFERENCE_STATISTICS',
-    'REFERENCE_FORMAT_INLINE', 'REFERENCE_FORMAT_DETAILED',
-    'MIN_RELEVANCE_THRESHOLD', 'PREFER_RECENT_SOURCES', 'MAX_DAYS_OLD_PREFERRED',
-    'GROUP_REFERENCES_BY_TYPE', 'DEDUPLICATE_SAME_TIMESTAMP', 'MAX_REFERENCES_IN_APPENDIX',
-    'INCLUDE_REFERENCE_APPENDIX', 'INCLUDE_SOURCE_STATISTICS', 'INCLUDE_QUALITY_INDICATORS',
-    'ReferenceConfig', 'reference_config', 'REFERENCE_PRESETS',
-    'get_preset_config', 'apply_preset',
+    'REFERENCE_FORMAT_INLINE',
+    'REFERENCE_FORMAT_DETAILED',
+    'MIN_RELEVANCE_THRESHOLD',
+    'PREFER_RECENT_SOURCES',
+    'MAX_DAYS_OLD_PREFERRED',
+    'GROUP_REFERENCES_BY_TYPE',
+    'DEDUPLICATE_SAME_TIMESTAMP',
+    'MAX_REFERENCES_IN_APPENDIX',
+    'INCLUDE_REFERENCE_APPENDIX',
+    'INCLUDE_SOURCE_STATISTICS',
+    'INCLUDE_QUALITY_INDICATORS',
+
+    # Exceptions
+    'ConfigurationError',
+    'InvalidConfigValueError',
+    'MissingRequiredConfigError',
+    'InvalidPathError',
+    'InvalidDeviceModeError',
+    'VLLMConfigurationError',
+    'ModelConfigurationError',
 ]
+
+
+# Provide backward compatibility for old import patterns
+# e.g., `from config import BASE_DIR`
+def __getattr__(name: str):
+    """
+    Provide backward compatibility for module-level imports.
+
+    Allows old code like `from config import BASE_DIR` to continue working
+    by delegating to the settings instance.
+    """
+    # Try to get from settings module first (which has __getattr__ for legacy support)
+    from . import settings as settings_module
+
+    try:
+        return getattr(settings_module, name)
+    except AttributeError:
+        pass
+
+    # If not found, raise AttributeError
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
