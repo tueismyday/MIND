@@ -1,5 +1,5 @@
 """
-Enhanced document generation workflow with two-stage subsection-level validation and source reference tracking.
+Document generation workflow with two-stage subsection-level validation and source reference tracking.
 Orchestrates document creation with detailed citations, traceability, and granular quality control.
 """
 
@@ -11,17 +11,16 @@ from core.embeddings import get_embeddings
 from generation.section_generator import generate_section_with_hybrid_approach
 from utils.pdf_utils import save_to_pdf
 from utils.text_processing import extract_final_section, assemble_final_document
-from utils.validation_report_logger import get_report_logger
-from config.settings import GENERATED_DOCS_DB_DIR, DEFAULT_VALIDATION_CYCLES
+from config.settings import GENERATED_DOCS_DB_DIR, DEFAULT_VALIDATION_CYCLES, MAX_SOURCES_PER_FACT
 
-class EnhancedDocumentGenerator:
-    """Enhanced document generator with multi-fact retrieval and smart validation."""
+class DocumentGenerator:
+    """ document generator with multi-fact retrieval and smart validation."""
     
     def __init__(self, include_references: bool = True, max_references_per_section: int = 3,
                  enable_subsection_validation: bool = True, max_revision_cycles: int = None,
                  use_hybrid_approach: bool = True): 
         """
-        Initialize the enhanced document generator.
+        Initialize the  document generator.
         
         Args:
             include_references: Whether to include source references
@@ -66,15 +65,9 @@ class EnhancedDocumentGenerator:
         if max_revision_cycles is None:
             max_revision_cycles = self.max_revision_cycles
             
-        print(f"[INFO] Starting enhanced document generation with two-stage validation")
+        print(f"[INFO] Starting document generation ...")
         print(f"  • References: {include_references}")
-        print(f"  • Two-stage subsection validation: {enable_validation}")
-        if include_references:
-            print(f"  • Max {max_references_per_section} references per section")
-        if enable_validation:
-            print(f"  • Max {max_revision_cycles} revision cycles per subsection")
-            print(f"  • Stage 1: Fact-checking against patient records")
-            print(f"  • Stage 2: Guideline adherence checking")
+        print(f"  • Validation: {enable_validation}")
         
         # LEGACY, FIX, DATA NOT NEEDED ANYMORE
         patient_data = None
@@ -91,15 +84,13 @@ class EnhancedDocumentGenerator:
         
         for i, (title, guideline) in enumerate(guidelines.items(), 1):
             print(f"[INFO] Creating section {i}/{len(guidelines)}: '{title}'")
-            print(f"[DEBUG] Section '{title}' guideline type: {type(guideline)}")
-            print(f"[DEBUG] Section '{title}' guideline length: {len(guideline) if isinstance(guideline, (str, list)) else 'N/A'}")
 
             # Generate section using hybrid approach
             section_output, section_sources, validation_details = generate_section_with_hybrid_approach(
                 section_title=title,
                 section_guidelines=guideline,
                 patient_data=patient_data,
-                max_sources_per_fact=max_references_per_section // 2 if max_references_per_section > 1 else 1,
+                max_sources_per_fact=MAX_SOURCES_PER_FACT,
                 enable_validation=enable_validation
             )
             
@@ -122,24 +113,20 @@ class EnhancedDocumentGenerator:
         
         # Create document with optional reference appendix and validation report
         if include_references and self.all_sources_used:
-            final_document = self._assemble_document_with_references_and_validation(generated_sections)
+            final_document = self._assemble_document(generated_sections)
         else:
             final_document = assemble_final_document(generated_sections, self.validation_report.get('sections') if enable_validation else None)
-
-        # DEBUGGER
-        print("\n=== FINAL DOCUMENT TEXT ===")
-        print(final_document)
-        print("=== END ===\n")
         
         # Save the document
         save_to_pdf(final_document, output_name)
 
-        logger = get_report_logger()
-        logger.generate_pdf_report(filename="validation_report.pdf")
-        print(f"[SUCCESS] Validation report saved to reports/validation_report.pdf")
+        # Save appendices to separate text file in /reports
+        if include_references or enable_validation:
+            self._save_appendices_to_file(output_name)
+        
         
         # Index for future retrieval
-        self.index_final_document()
+        ###################### self.index_final_document()
         
         # Print comprehensive summary
         self._print_generation_summary(output_name, generated_sections, enable_validation, include_references)
@@ -196,20 +183,10 @@ class EnhancedDocumentGenerator:
         self.validation_report['summary'] = summary
 
 
-    def _assemble_document_with_references_and_validation(self, section_outputs: dict) -> str:
-        """Assemble document with reference appendix and two-stage validation report."""
-        document_parts = []
-        
+    def _assemble_document(self, section_outputs: dict) -> str:
+        """Assemble main document WITHOUT appendices (saved separately to /reports)."""
         main_document = assemble_final_document(section_outputs, self.validation_report.get('sections'))
-        document_parts.append(main_document)
-        
-        if self.all_sources_used:
-            document_parts.extend(self._create_reference_appendix())
-        
-        if self.validation_report['sections']:
-            document_parts.extend(self._create_validation_appendix())
-        
-        return "\n".join(document_parts)
+        return main_document
     
     def _create_reference_appendix(self) -> list:
         """Create a comprehensive reference appendix."""
@@ -323,29 +300,37 @@ class EnhancedDocumentGenerator:
                 
                 appendix.append("")
         
-        # Quality assurance notes
-        appendix.append("### TO-TRINS KVALITETSSIKRING")
-        appendix.append("Alle undersektioner er blevet valideret gennem følgende to-trins proces:")
-        appendix.append("")
-        appendix.append("**TRIN 1: FAKTATJEK**")
-        appendix.append("• Faktuel nøjagtighed verificeret mod patientjournalen")
-        appendix.append("• RAG-baseret kildehenvisning kontrol")
-        appendix.append("• Korrekte datoer, medicindoseringer og diagnoser")
-        appendix.append("")
-        appendix.append("**TRIN 2: RETNINGSLINJER ADHERENCE**")
-        appendix.append("• Struktur og format kontrolleret mod hospitalets retningslinjer")
-        appendix.append("• Irrelevant information fjernet")
-        appendix.append("• Korrekt organisering og præsentation af informationer")
-        appendix.append("")
-        appendix.append("Kun undersektioner der opfylder begge trin er inkluderet i det endelige dokument.")
-        
         return appendix
-    
+
+    def _save_appendices_to_file(self, output_name: str):
+        """Save references and validation appendices to separate text file in /reports."""
+        import os
+        from pathlib import Path
+        
+        # Create reports directory if it doesn't exist
+        reports_dir = Path("reports")
+        reports_dir.mkdir(exist_ok=True)
+        
+        # Create filename based on main document name
+        base_name = Path(output_name).stem
+        appendix_filename = reports_dir / f"{base_name}_appendices.txt"
+        
+        # Build appendix content
+        appendix_parts = []
+        
+        if self.all_sources_used:
+            appendix_parts.extend(self._create_reference_appendix())
+        
+        if isinstance(self.validation_report, dict) and self.validation_report.get('sections'):
+            appendix_parts.extend(self._create_validation_appendix())
+
+        print(f"[INFO] Appendices/validation report saved to {appendix_filename}")
+        
     def _print_generation_summary(self, output_name: str, generated_sections: dict, 
                                 enable_validation: bool, include_references: bool):
         """Print comprehensive generation summary."""
         
-        print(f"\n[RESULT] Enhanced document generated successfully:")
+        print(f"\n[RESULT] Document generated successfully:")
         print(f"  • File: {output_name}")
         print(f"  • Sections: {len(generated_sections)}")
         
@@ -473,7 +458,7 @@ class EnhancedDocumentGenerator:
         print("[INFO] Indexing generated document for future retrieval...")
         
         # Creating vectordatabase for the generated documents, enabling retrieval
-        ################ Chroma_db_generated_document_final.main()
+        Chroma_db_generated_document_final.main()
         
         # Update the global database manager with the new generated docs DB
         db_manager._generated_docs_db = Chroma(
@@ -483,6 +468,4 @@ class EnhancedDocumentGenerator:
         
         print("[RESULT] Document has been indexed and is available for retrieval.")
 
-# For backward compatibility, create aliases to the original class name
-DocumentGenerator = EnhancedDocumentGenerator
             
