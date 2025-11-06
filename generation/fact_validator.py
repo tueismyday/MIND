@@ -1,5 +1,5 @@
 """
-Simple fact-level validator for fact-by-fact generation.
+Fact-level validator for fact-by-fact generation.
 Validates individual fact answers against their sources.
 """
 
@@ -14,6 +14,31 @@ class FactValidator:
     
     def __init__(self):
         self.llm = llm_config.llm_critique
+        
+        # Template string - will be formatted later with actual values
+        self.validation_prompt_template = """
+        Du er en kvalitetskontrollør der skal validere et svar om en patient.
+        
+        FAKTUM DER BLEV BESVARET:
+        {fact_description}
+        
+        SVAR DER SKAL VALIDERES:
+        {answer}
+        
+        KILDER FRA PATIENTJOURNAL:
+        {sources_text}
+        
+        DIN OPGAVE:
+        1. Tjek om svaret er korrekt baseret på kilderne
+        2. Tjek om kildehenvisningen [Kilde: Type - Dato] er præcis
+        3. Tjek om den nyeste information er brugt
+        
+        Hvis svaret er KORREKT, skriv præcis: "VALID"
+        
+        Hvis svaret har FEJL, ret det og returner det korrigerede svar med korrekte kildehenvisninger.
+        
+        Skriv kun enten "VALID" eller det korrigerede svar:
+        """
     
     def validate_fact_answer(self, 
                             fact: RequiredFact,
@@ -39,29 +64,12 @@ class FactValidator:
         # Format sources for validation
         sources_text = self._format_sources(sources)
         
-        validation_prompt = f"""
-Du er en kvalitetskontrollør der skal validere et svar om en patient.
-
-FAKTUM DER BLEV BESVARET:
-{fact.description}
-
-SVAR DER SKAL VALIDERES:
-{answer}
-
-KILDER FRA PATIENTJOURNAL:
-{sources_text}
-
-DIN OPGAVE:
-1. Tjek om svaret er korrekt baseret på kilderne
-2. Tjek om kildehenvisningen [Kilde: Type - Dato] er præcis
-3. Tjek om den nyeste information er brugt
-
-Hvis svaret er KORREKT, skriv præcis: "VALID"
-
-Hvis svaret har FEJL, ret det og returner det korrigerede svar med korrekte kildehenvisninger.
-
-Skriv kun enten "VALID" eller det korrigerede svar:
-"""
+        # Format the validation prompt with actual values
+        validation_prompt = self.validation_prompt_template.format(
+            fact_description=fact.description,
+            answer=answer,
+            sources_text=sources_text
+        )
         
         try:
             validation_result = safe_llm_invoke(validation_prompt, self.llm, max_retries=1, operation="fact_validation")
