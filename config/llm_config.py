@@ -1,44 +1,98 @@
 """
-LLM configuration for the Agentic RAG Medical Documentation System.
-Manages the setup and configuration of different LLM instances using vLLM.
+LLM configuration and client management for the MIND medical documentation system.
+
+This module manages vLLM client instances for both server mode (external API)
+and local mode (in-Python instance). Provides a unified interface for LLM
+operations with automatic token tracking.
 """
+
+import logging
+from typing import Dict, Any, Optional
+
 from openai import OpenAI
-from .settings import (
-    TEMPERATURE,
-    TOP_P,
-    TOP_K,
-    MIN_P,
-    PRESENCE_PENALTY,
-    VLLM_MODE,
-    VLLM_SERVER_URL,
-    VLLM_MODEL_NAME,
-    VLLM_GPU_MEMORY_UTILIZATION,
-    VLLM_MAX_MODEL_LEN,
-    VLLM_MAX_NUM_SEQS
-)
+
+logger = logging.getLogger(__name__)
+
 
 class VLLMClient:
-    """vLLM client wrapper compatible with your existing interface."""
+    """
+    vLLM client wrapper for server mode (OpenAI-compatible API).
 
-    def __init__(self, model_name, temperature=None, base_url="http://localhost:8000"):
+    Connects to an external vLLM server running with OpenAI-compatible API.
+    Supports temperature, top_p, and presence_penalty parameters.
+
+    Attributes:
+        model_name: HuggingFace model identifier
+        temperature: Default sampling temperature
+        base_url: Base URL of the vLLM server
+        last_usage: Token usage from last invocation
+
+    Example:
+        >>> client = VLLMClient(
+        ...     model_name="Qwen/Qwen3-30B",
+        ...     temperature=0.2,
+        ...     base_url="http://localhost:8000"
+        ... )
+        >>> response = client.invoke("Hello, world!")
+        >>> print(client.last_usage)
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        temperature: float = 0.2,
+        base_url: str = "http://localhost:8000"
+    ):
+        """
+        Initialize vLLM client for server mode.
+
+        Args:
+            model_name: HuggingFace model identifier
+            temperature: Default sampling temperature
+            base_url: Base URL of the vLLM server
+        """
         self.model_name = model_name
-        self.temperature = temperature if temperature is not None else TEMPERATURE
+        self.temperature = temperature
         self.base_url = base_url.rstrip('/')
-        self.last_usage = None  # Store token usage from last invocation
+        self.last_usage: Optional[Dict[str, int]] = None
 
         self.client = OpenAI(
             api_key="EMPTY",  # vLLM doesn't require API key
             base_url=f"{self.base_url}/v1",
         )
-    
-    def invoke(self, prompt, **kwargs):
+
+        logger.debug(
+            f"Initialized VLLMClient: model={model_name}, "
+            f"base_url={self.base_url}, temperature={temperature}"
+        )
+
+    def invoke(self, prompt: str, **kwargs) -> str:
         """
-        Invoke method to maintain compatibility with langchain interface.
+        Invoke the language model with the given prompt.
+
+        Maintains compatibility with langchain interface.
         Captures token usage information for tracking purposes.
-        Uses hard defaults from settings.py for generation parameters.
-        
-        Note: Server mode (OpenAI API) only supports: temperature, top_p, presence_penalty, frequency_penalty
-        top_k and min_p are NOT supported in server mode (only in local mode).
+
+        Note: Server mode (OpenAI API) only supports:
+            temperature, top_p, presence_penalty, frequency_penalty
+        The top_k and min_p parameters are NOT supported in server mode.
+
+        Args:
+            prompt: Input prompt text
+            **kwargs: Additional generation parameters (temperature, max_tokens, etc.)
+
+        Returns:
+            Generated text response
+
+        Raises:
+            RuntimeError: If vLLM generation fails or returns None
+
+        Example:
+            >>> response = client.invoke(
+            ...     "What is diabetes?",
+            ...     temperature=0.5,
+            ...     max_tokens=1000
+            ... )
         """
         try:
             response = self.client.chat.completions.create(
@@ -46,8 +100,8 @@ class VLLMClient:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=kwargs.get('temperature', self.temperature),
                 max_tokens=kwargs.get('max_tokens', 6056),
-                top_p=kwargs.get('top_p', TOP_P),
-                presence_penalty=kwargs.get('presence_penalty', PRESENCE_PENALTY),
+                top_p=kwargs.get('top_p', 0.95),
+                presence_penalty=kwargs.get('presence_penalty', 1.5),
             )
 
             # Capture token usage information if available
@@ -57,6 +111,11 @@ class VLLMClient:
                     'completion_tokens': response.usage.completion_tokens,
                     'total_tokens': response.usage.total_tokens
                 }
+                logger.debug(
+                    f"Token usage: prompt={self.last_usage['prompt_tokens']}, "
+                    f"completion={self.last_usage['completion_tokens']}, "
+                    f"total={self.last_usage['total_tokens']}"
+                )
             else:
                 self.last_usage = None
 
@@ -64,54 +123,88 @@ class VLLMClient:
             content = response.choices[0].message.content
 
             if content is None:
-                print(f"[ERROR] vLLM returned None response")
-                print(f"[DEBUG] Prompt length: {len(prompt)} chars")
-                raise RuntimeError("vLLM returned empty response - prompt may be too long or server issue")
+                logger.error("vLLM returned None response")
+                logger.debug(f"Prompt length: {len(prompt)} characters")
+                raise RuntimeError(
+                    "vLLM returned empty response - prompt may be too long or server issue"
+                )
 
             return content.strip()
-            
+
         except AttributeError as e:
             # Specific error for None.strip()
-            print(f"[ERROR] vLLM response was None")
-            raise RuntimeError(f"vLLM generation failed: Response was None (likely context overflow or server error)")
+            logger.error(f"vLLM response was None: {e}", exc_info=True)
+            raise RuntimeError(
+                "vLLM generation failed: Response was None "
+                "(likely context overflow or server error)"
+            ) from e
+
         except Exception as e:
-            print(f"[ERROR] vLLM error: {str(e)}")
-            raise RuntimeError(f"vLLM generation failed: {e}")
+            logger.error(f"vLLM generation error: {e}", exc_info=True)
+            raise RuntimeError(f"vLLM generation failed: {e}") from e
+
 
 class InPythonVLLMClient:
-    """vLLM client for in-process model loading (local mode)."""
+    """
+    vLLM client for local mode (in-Python model loading).
 
-    def __init__(self, model_name, temperature=None,
-                 gpu_memory_utilization=0.75,
-                 max_model_len=14000,
-                 max_num_seqs=1):
+    Loads the vLLM model directly in the Python process for local inference.
+    Supports all sampling parameters including top_k and min_p.
+
+    Attributes:
+        model_name: HuggingFace model identifier
+        temperature: Default sampling temperature
+        llm: vLLM LLM instance
+        last_usage: Token usage from last invocation
+
+    Example:
+        >>> client = InPythonVLLMClient(
+        ...     model_name="Qwen/Qwen3-30B",
+        ...     temperature=0.2,
+        ...     gpu_memory_utilization=0.75,
+        ...     max_model_len=14000
+        ... )
+        >>> response = client.invoke("Hello, world!")
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        temperature: float = 0.2,
+        gpu_memory_utilization: float = 0.75,
+        max_model_len: int = 14000,
+        max_num_seqs: int = 1
+    ):
         """
-        Initialize in-Python vLLM client.
+        Initialize in-Python vLLM client for local mode.
 
         Args:
-            model_name: HuggingFace model name
-            temperature: Default sampling temperature (uses TEMPERATURE from settings if None)
-            gpu_memory_utilization: GPU memory fraction for model (0.0-1.0)
+            model_name: HuggingFace model identifier
+            temperature: Default sampling temperature
+            gpu_memory_utilization: GPU memory fraction (0.0-1.0)
             max_model_len: Maximum context length
             max_num_seqs: Maximum number of sequences to process in parallel
+
+        Raises:
+            ImportError: If vLLM is not installed
         """
         try:
             from vllm import LLM, SamplingParams
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "vLLM is not installed. Install it with: pip install vllm"
-            )
+            ) from e
 
         self.model_name = model_name
-        self.temperature = temperature if temperature is not None else TEMPERATURE
-        self.last_usage = None
+        self.temperature = temperature
+        self.last_usage: Optional[Dict[str, int]] = None
         self.SamplingParams = SamplingParams
 
-        print(f"[vLLM LOCAL] Initializing in-Python vLLM instance...")
-        print(f"[vLLM LOCAL] Model: {model_name}")
-        print(f"[vLLM LOCAL] GPU Memory Utilization: {gpu_memory_utilization}")
-        print(f"[vLLM LOCAL] Max Model Length: {max_model_len}")
-        print(f"[vLLM LOCAL] Max Num Seqs: {max_num_seqs}")
+        logger.info("Initializing in-Python vLLM instance...")
+        logger.info(f"  Model: {model_name}")
+        logger.info(f"  GPU Memory Utilization: {gpu_memory_utilization}")
+        logger.info(f"  Max Model Length: {max_model_len}")
+        logger.info(f"  Max Num Seqs: {max_num_seqs}")
 
         # Initialize vLLM with local model
         self.llm = LLM(
@@ -122,45 +215,71 @@ class InPythonVLLMClient:
             trust_remote_code=True  # Required for some models like Qwen
         )
 
-        print(f"[vLLM LOCAL] Model loaded successfully!")
+        logger.info("vLLM model loaded successfully!")
 
-    def invoke(self, prompt, **kwargs):
+    def invoke(self, prompt: str, **kwargs) -> str:
         """
-        Invoke method to maintain compatibility with langchain interface.
+        Invoke the language model with the given prompt.
+
+        Maintains compatibility with langchain interface.
         Captures token usage information for tracking purposes.
-        Uses hard defaults from settings.py for all generation parameters.
-        
-        Note: Local mode (vLLM native API) supports ALL parameters including:
-        temperature, top_p, top_k, min_p, presence_penalty
+
+        Note: Local mode (vLLM native API) supports ALL parameters:
+            temperature, top_p, top_k, min_p, presence_penalty
+
+        Args:
+            prompt: Input prompt text
+            **kwargs: Additional generation parameters
+
+        Returns:
+            Generated text response
+
+        Raises:
+            RuntimeError: If vLLM generation fails or returns None
+
+        Example:
+            >>> response = client.invoke(
+            ...     "What is diabetes?",
+            ...     temperature=0.5,
+            ...     top_k=20,
+            ...     max_tokens=1000
+            ... )
         """
         try:
             # Create sampling parameters with all generation settings
             sampling_params = self.SamplingParams(
                 temperature=kwargs.get('temperature', self.temperature),
                 max_tokens=kwargs.get('max_tokens', 6056),
-                top_p=kwargs.get('top_p', TOP_P),
-                top_k=kwargs.get('top_k', TOP_K),
-                min_p=kwargs.get('min_p', MIN_P),
-                presence_penalty=kwargs.get('presence_penalty', PRESENCE_PENALTY),
+                top_p=kwargs.get('top_p', 0.95),
+                top_k=kwargs.get('top_k', 20),
+                min_p=kwargs.get('min_p', 0.0),
+                presence_penalty=kwargs.get('presence_penalty', 1.5),
             )
 
             # Generate response
             outputs = self.llm.generate([prompt], sampling_params)
 
             if not outputs or len(outputs) == 0:
-                print(f"[ERROR] vLLM returned no outputs")
+                logger.error("vLLM returned no outputs")
                 raise RuntimeError("vLLM returned empty response")
 
             output = outputs[0]
 
             # Capture token usage information
             if hasattr(output, 'metrics') and output.metrics:
-                metrics = output.metrics
                 self.last_usage = {
                     'prompt_tokens': len(output.prompt_token_ids),
                     'completion_tokens': sum(len(o.token_ids) for o in output.outputs),
-                    'total_tokens': len(output.prompt_token_ids) + sum(len(o.token_ids) for o in output.outputs)
+                    'total_tokens': (
+                        len(output.prompt_token_ids) +
+                        sum(len(o.token_ids) for o in output.outputs)
+                    )
                 }
+                logger.debug(
+                    f"Token usage: prompt={self.last_usage['prompt_tokens']}, "
+                    f"completion={self.last_usage['completion_tokens']}, "
+                    f"total={self.last_usage['total_tokens']}"
+                )
             else:
                 self.last_usage = None
 
@@ -168,64 +287,113 @@ class InPythonVLLMClient:
             generated_text = output.outputs[0].text
 
             if generated_text is None:
-                print(f"[ERROR] vLLM returned None response")
-                print(f"[DEBUG] Prompt length: {len(prompt)} chars")
-                raise RuntimeError("vLLM returned empty response - prompt may be too long")
+                logger.error("vLLM returned None response")
+                logger.debug(f"Prompt length: {len(prompt)} characters")
+                raise RuntimeError(
+                    "vLLM returned empty response - prompt may be too long"
+                )
 
             return generated_text.strip()
 
         except Exception as e:
-            print(f"[ERROR] vLLM local generation error: {str(e)}")
-            raise RuntimeError(f"vLLM local generation failed: {e}")
+            logger.error(f"vLLM local generation error: {e}", exc_info=True)
+            raise RuntimeError(f"vLLM local generation failed: {e}") from e
+
 
 class LLMConfig:
-    """Configuration class for managing vLLM instances in server or local mode."""
+    """
+    Configuration manager for vLLM instances in server or local mode.
 
-    def __init__(self,
-                 mode=None,
-                 base_url=None,
-                 model_name=None,
-                 gpu_memory_utilization=None,
-                 max_model_len=None,
-                 max_num_seqs=None):
+    Manages the creation and caching of vLLM client instances
+    for different purposes (retrieve, generate, critique).
+    Uses lazy initialization to avoid loading models until needed.
+
+    Attributes:
+        mode: Operating mode ("server" or "local")
+        base_url: Server URL (server mode only)
+        model_name: HuggingFace model identifier
+        gpu_memory_utilization: GPU memory fraction (local mode only)
+        max_model_len: Max context length (local mode only)
+        max_num_seqs: Max parallel sequences (local mode only)
+
+    Example:
+        >>> from config.vllm import VLLMConfig as VLLMSettings
+        >>> from config.generation import GenerationConfig
+        >>> vllm_settings = VLLMSettings()
+        >>> gen_settings = GenerationConfig()
+        >>> llm_config = LLMConfig(
+        ...     mode=vllm_settings.vllm_mode,
+        ...     model_name=vllm_settings.vllm_model_name,
+        ...     base_url=vllm_settings.vllm_server_url,
+        ...     temperature=gen_settings.temperature
+        ... )
+        >>> llm = llm_config.llm_generate
+        >>> response = llm.invoke("Hello, world!")
+    """
+
+    def __init__(
+        self,
+        mode: str = "server",
+        base_url: str = "http://localhost:8000",
+        model_name: str = "cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit",
+        temperature: float = 0.2,
+        gpu_memory_utilization: float = 0.90,
+        max_model_len: int = 14000,
+        max_num_seqs: int = 1
+    ):
         """
-        Initialize LLM configuration.
+        Initialize LLM configuration manager.
 
         Args:
-            mode: "server" or "local" (defaults to VLLM_MODE from settings)
-            base_url: Server URL for server mode (defaults to VLLM_SERVER_URL)
-            model_name: Model name (defaults to VLLM_MODEL_NAME)
-            gpu_memory_utilization: GPU memory fraction for local mode (defaults to VLLM_GPU_MEMORY_UTILIZATION)
-            max_model_len: Max context length for local mode (defaults to VLLM_MAX_MODEL_LEN)
-            max_num_seqs: Max parallel sequences for local mode (defaults to VLLM_MAX_NUM_SEQS)
+            mode: "server" or "local"
+            base_url: Server URL (server mode)
+            model_name: HuggingFace model identifier
+            temperature: Default sampling temperature
+            gpu_memory_utilization: GPU memory fraction (local mode)
+            max_model_len: Max context length (local mode)
+            max_num_seqs: Max parallel sequences (local mode)
+
+        Raises:
+            ValueError: If mode is invalid
         """
-
-        # Use provided values or fall back to settings
-        self.mode = mode if mode is not None else VLLM_MODE
-        self.base_url = base_url if base_url is not None else VLLM_SERVER_URL
-        self.model_name = model_name if model_name is not None else VLLM_MODEL_NAME
-        self.gpu_memory_utilization = gpu_memory_utilization if gpu_memory_utilization is not None else VLLM_GPU_MEMORY_UTILIZATION
-        self.max_model_len = max_model_len if max_model_len is not None else VLLM_MAX_MODEL_LEN
-        self.max_num_seqs = max_num_seqs if max_num_seqs is not None else VLLM_MAX_NUM_SEQS
-
         # Validate mode
-        if self.mode not in ["server", "local"]:
-            raise ValueError(f"Invalid VLLM_MODE: {self.mode}. Must be 'server' or 'local'")
+        if mode not in ["server", "local"]:
+            raise ValueError(
+                f"Invalid vLLM mode: {mode}. Must be 'server' or 'local'"
+            )
 
-        print(f"[LLM CONFIG] Mode: {self.mode}")
-        print(f"[LLM CONFIG] Model: {self.model_name}")
+        self.mode = mode
+        self.base_url = base_url
+        self.model_name = model_name
+        self.temperature = temperature
+        self.gpu_memory_utilization = gpu_memory_utilization
+        self.max_model_len = max_model_len
+        self.max_num_seqs = max_num_seqs
+
+        logger.info(f"LLM Configuration Mode: {self.mode}")
+        logger.info(f"LLM Model: {self.model_name}")
+
         if self.mode == "server":
-            print(f"[LLM CONFIG] Server URL: {self.base_url}")
+            logger.info(f"LLM Server URL: {self.base_url}")
         else:
-            print(f"[LLM CONFIG] GPU Memory Utilization: {self.gpu_memory_utilization}")
-            print(f"[LLM CONFIG] Max Model Length: {self.max_model_len}")
+            logger.info(f"LLM GPU Memory Utilization: {self.gpu_memory_utilization}")
+            logger.info(f"LLM Max Model Length: {self.max_model_len}")
 
-        self._llm_retrieve = None
-        self._llm_generate = None
-        self._llm_critique = None
-    
-    def _create_client(self, temperature):
-        """Create a client instance based on the current mode."""
+        # Lazy initialization of clients
+        self._llm_retrieve: Optional[Any] = None
+        self._llm_generate: Optional[Any] = None
+        self._llm_critique: Optional[Any] = None
+
+    def _create_client(self, temperature: float) -> Any:
+        """
+        Create a client instance based on the current mode.
+
+        Args:
+            temperature: Sampling temperature for this client
+
+        Returns:
+            VLLMClient or InPythonVLLMClient instance
+        """
         if self.mode == "server":
             return VLLMClient(
                 model_name=self.model_name,
@@ -242,25 +410,89 @@ class LLMConfig:
             )
 
     @property
-    def llm_retrieve(self):
-        """Get the retrieval LLM instance (server or local based on mode)."""
+    def llm_retrieve(self) -> Any:
+        """
+        Get the retrieval LLM instance (lazy initialization).
+
+        Returns:
+            VLLMClient or InPythonVLLMClient for retrieval tasks
+        """
         if self._llm_retrieve is None:
-            self._llm_retrieve = self._create_client(TEMPERATURE)
+            logger.debug("Initializing LLM for retrieval")
+            self._llm_retrieve = self._create_client(self.temperature)
         return self._llm_retrieve
 
     @property
-    def llm_generate(self):
-        """Get the generation LLM instance (server or local based on mode)."""
+    def llm_generate(self) -> Any:
+        """
+        Get the generation LLM instance (lazy initialization).
+
+        Returns:
+            VLLMClient or InPythonVLLMClient for generation tasks
+        """
         if self._llm_generate is None:
-            self._llm_generate = self._create_client(TEMPERATURE)
+            logger.debug("Initializing LLM for generation")
+            self._llm_generate = self._create_client(self.temperature)
         return self._llm_generate
 
     @property
-    def llm_critique(self):
-        """Get the critique LLM instance (server or local based on mode)."""
+    def llm_critique(self) -> Any:
+        """
+        Get the critique LLM instance (lazy initialization).
+
+        Returns:
+            VLLMClient or InPythonVLLMClient for critique tasks
+        """
         if self._llm_critique is None:
-            self._llm_critique = self._create_client(TEMPERATURE)
+            logger.debug("Initializing LLM for critique")
+            self._llm_critique = self._create_client(self.temperature)
         return self._llm_critique
 
+
 # Global LLM configuration instance
-llm_config = LLMConfig()
+# Note: This will be initialized with default settings from settings.py
+# when first imported
+llm_config: Optional[LLMConfig] = None
+
+
+def get_llm_config() -> LLMConfig:
+    """
+    Get the global LLM configuration instance.
+
+    Creates the instance using settings from config.settings if not already created.
+    This provides backward compatibility with existing code.
+
+    Returns:
+        Global LLMConfig instance
+
+    Example:
+        >>> llm_config = get_llm_config()
+        >>> llm = llm_config.llm_generate
+    """
+    global llm_config
+
+    if llm_config is None:
+        # Import here to avoid circular dependency
+        from .vllm import VLLMConfig as VLLMSettings
+        from .generation import GenerationConfig
+
+        vllm_settings = VLLMSettings()
+        gen_settings = GenerationConfig()
+
+        logger.info("Creating global LLMConfig instance")
+
+        llm_config = LLMConfig(
+            mode=vllm_settings.vllm_mode,
+            base_url=vllm_settings.vllm_server_url,
+            model_name=vllm_settings.vllm_model_name,
+            temperature=gen_settings.temperature,
+            gpu_memory_utilization=vllm_settings.vllm_gpu_memory_utilization,
+            max_model_len=vllm_settings.vllm_max_model_len,
+            max_num_seqs=vllm_settings.vllm_max_num_seqs
+        )
+
+    return llm_config
+
+
+# Initialize global instance
+llm_config = get_llm_config()

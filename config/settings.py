@@ -1,255 +1,373 @@
 """
-Configuration settings for the Agentic RAG Medical Documentation System.
-Contains all constants, paths, and configuration parameters.
+Main configuration settings for the MIND medical documentation system.
+
+This module provides the central MINDSettings class that aggregates all
+configuration subsystems (paths, models, retrieval, generation, vLLM).
+
+Configuration can be loaded from:
+    - Environment variables (MIND_* prefix)
+    - .env file
+    - Direct instantiation with overrides
+
+Example:
+    >>> from config import get_settings
+    >>> settings = get_settings()
+    >>> print(settings.paths.data_dir)
+    >>> print(settings.models.embedding_model_name)
+    >>> print(settings.generation.temperature)
 """
 
-import os
-from pathlib import Path
-import torch
+import logging
+from functools import lru_cache
+from typing import Optional
 
-# Base project directory
-BASE_DIR = Path(__file__).parent.parent
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Data directories
-DATA_DIR = BASE_DIR / "data"
-GUIDELINE_DIR = DATA_DIR / "hospital_guidelines"
-PATIENT_RECORD_DIR = DATA_DIR / "patient_record"
-GENERATED_DOCS_DIR = DATA_DIR / "generated_documents"
+from .exceptions import ConfigurationError
+from .generation import GenerationConfig
+from .models import ModelConfig
+from .paths import PathConfig
+from .retrieval import RetrievalConfig
+from .vllm import VLLMConfig
 
-# Vector database directories
-GUIDELINE_DB_DIR = DATA_DIR / "hospital_guidelines_db"
-PATIENT_DB_DIR = DATA_DIR / "patient_record_db"
-GENERATED_DOCS_DB_DIR = DATA_DIR / "generated_documents_db"
-
-# Cache directories
-CACHE_DIR = DATA_DIR / "sentence_transformers_cache"
-
-# Embedding model configuration
-EMBEDDING_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
-RERANKER_MODEL_NAME = "Qwen/Qwen3-Reranker-0.6B"
-
-# Device configuration for models
-# Options: "cuda", "cuda:0", "cuda:1", "cpu"
-# When using vLLM, adjust --gpu-memory-utilization to leave space for embedding/reranker
-# Recommended: vLLM with 0.70-0.75 utilization to leave ~25-30% for these models
-
-# Device selection mode for each model
-# Options: "auto" (automatic device selection with GPU memory check), "cpu" (force CPU), "cuda" (force GPU)
-EMBEDDING_DEVICE_MODE = os.environ.get('EMBEDDING_DEVICE_MODE', 'cpu').lower() ######
-RERANKER_DEVICE_MODE = os.environ.get('RERANKER_DEVICE_MODE', 'cpu').lower() ######
-
-# Agent configuration
-MAX_AGENT_ITERATIONS = 10
-AGENT_EARLY_STOPPING_METHOD = "generate"
-MEMORY_MAX_TOKEN_LIMIT = 12000
-CHAT_HISTORY_LIMIT = 20
-
-# Retrieval configuration
-INITIAL_RETRIEVAL_K = 20
-FINAL_RETRIEVAL_K = 10
-SIMILARITY_SCORE_THRESHOLD = 0.5
-# cross-encoder reranker batchsize
-BATCH_SIZE_RERANK = 1
-
-GUIDELINE_SEARCH_K = 5
-GENERATED_DOC_SEARCH_K = 5
-
-# Generation configuration
-# These parameters apply to all model calls (retrieve, generate, critique)
-# 
-# IMPORTANT - Parameter Compatibility:
-# - Server mode (VLLM_MODE="server"): Supports temperature, top_p, presence_penalty
-# - Local mode (VLLM_MODE="local"): Supports ALL parameters below
-# 
-# If using server mode, top_k and min_p will be ignored (OpenAI API limitation)
-TEMPERATURE = 0.2           # Controls randomness (0.0 = deterministic, 1.0 = very random)
-TOP_P = 0.95               # Nucleus sampling - cumulative probability cutoff
-TOP_K = 20                 # Top-k sampling - limits to top k tokens (LOCAL MODE ONLY)
-MIN_P = 0                  # Minimum probability threshold (LOCAL MODE ONLY, 0 = disabled)
-PRESENCE_PENALTY = 1.5     # Penalizes token repetition (0.0 = no penalty, 2.0 = max penalty)
-
-# vLLM configuration
-# Mode: "server" (localhost API) or "local" (in-Python instance)
-VLLM_MODE = os.environ.get('VLLM_MODE', 'server')  # "server" or "local"
-VLLM_SERVER_URL = os.environ.get('VLLM_SERVER_URL', 'http://localhost:8000')
-VLLM_MODEL_NAME = os.environ.get('VLLM_MODEL_NAME', 'cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit') #############################################################
-
-# leon-se/gemma-3-27b-it-qat-W4A16-G128
-# cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit
-# openai/gpt-oss-20b
-
-# vLLM local mode configuration (only used when VLLM_MODE="local")
-VLLM_GPU_MEMORY_UTILIZATION = float(os.environ.get('VLLM_GPU_MEMORY_UTILIZATION', '0.90'))
-VLLM_MAX_MODEL_LEN = int(os.environ.get('VLLM_MAX_MODEL_LEN', '14000'))
-VLLM_MAX_NUM_SEQS = int(os.environ.get('VLLM_MAX_NUM_SEQS', '1'))
-
-# Validation configuration
-DEFAULT_VALIDATION_CYCLES = 2  # Default number of validation/revision cycles per subsection
-MAX_VALIDATION_CYCLES = 3      # Maximum allowed validation cycles
-MIN_VALIDATION_CYCLES = 1      # Minimum validation cycles (at least one critique cycle)
-
-# Hybrid approach configuration
-USE_HYBRID_MULTI_FACT_APPROACH = True  # Enable multi-fact retrieval
-MAX_SOURCES_PER_FACT = 5  # Max sources to retrieve per individual fact
-
-# PDF configuration
-PDF_FONT_PATH = "DejaVuSans.ttf"
-DEFAULT_OUTPUT_NAME = "generated_medical_document.pdf"
-
-# Default patient file (if available)
-DEFAULT_PATIENT_FILE = PATIENT_RECORD_DIR / "Patient_journal_Geriatrisk_patient.pdf"
-
-# Date parsing formats for patient records
-DATE_FORMATS = ["%y.%m.%d %H:%M", "%y.%m.%d"]
-
-def ensure_directories():
-    """Create all necessary directories if they don't exist."""
-    directories = [
-        DATA_DIR, GUIDELINE_DIR, PATIENT_RECORD_DIR, GENERATED_DOCS_DIR,
-        GUIDELINE_DB_DIR, PATIENT_DB_DIR, GENERATED_DOCS_DB_DIR, CACHE_DIR
-    ]
-    
-    for directory in directories:
-        directory.mkdir(parents=True, exist_ok=True)
-        
-def get_patient_file_path():
-    """Get the path to the patient file if it exists."""
-    if DEFAULT_PATIENT_FILE.exists():
-        return str(DEFAULT_PATIENT_FILE)
-    return None
+logger = logging.getLogger(__name__)
 
 
-def get_device_config():
+class MINDSettings(BaseSettings):
     """
-    Get device configuration with intelligent fallback.
+    Main configuration class for the MIND system.
 
-    Respects EMBEDDING_DEVICE_MODE and RERANKER_DEVICE_MODE settings:
-    - "auto": Automatic device selection with GPU memory check
-    - "cpu": Force CPU usage
-    - "cuda": Force GPU usage (cuda:0)
+    Aggregates all configuration subsystems into a single validated
+    configuration object. Supports environment variable overrides
+    and .env file loading.
 
-    Uses torch.cuda.mem_get_info() which queries the CUDA driver directly
-    to get ACTUAL free memory, accounting for vLLM or any other GPU usage.
+    Attributes:
+        paths: Path configuration (directories, files)
+        models: Model configuration (embeddings, reranker, devices)
+        retrieval: Retrieval configuration (RAG parameters)
+        generation: Generation configuration (LLM sampling, validation)
+        vllm: vLLM configuration (server/local mode)
+
+    Environment Variables:
+        All configuration can be overridden via environment variables
+        with the MIND_ prefix. See individual config modules for details.
+
+    Configuration File:
+        Place a .env file in the project root to set default values.
+        Environment variables take precedence over .env file.
+
+    Example:
+        >>> settings = MINDSettings()
+        >>> settings.paths.ensure_directories()
+        >>> print(settings.models.get_model_summary())
+        >>> print(settings.vllm.get_vllm_summary())
+    """
+
+    # Configuration subsystems
+    paths: PathConfig = Field(default_factory=PathConfig)
+    models: ModelConfig = Field(default_factory=ModelConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    generation: GenerationConfig = Field(default_factory=GenerationConfig)
+    vllm: VLLMConfig = Field(default_factory=VLLMConfig)
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="MIND_",
+        env_nested_delimiter="__",
+        case_sensitive=False,
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+        extra="ignore"
+    )
+
+    def validate_all(self) -> bool:
+        """
+        Validate all configuration subsystems.
+
+        Returns:
+            True if all validations pass
+
+        Raises:
+            ConfigurationError: If any validation fails
+        """
+        try:
+            # Validate paths
+            self.paths.validate_paths()
+
+            # Validate models
+            if not self.models.embedding_model_name:
+                raise ConfigurationError("Embedding model name is required")
+            if not self.models.reranker_model_name:
+                raise ConfigurationError("Reranker model name is required")
+
+            # Validate vLLM
+            if self.vllm.is_server_mode():
+                if not self.vllm.vllm_server_url:
+                    raise ConfigurationError("vLLM server URL is required in server mode")
+
+            logger.info("Configuration validation successful")
+            return True
+
+        except Exception as e:
+            raise ConfigurationError(f"Configuration validation failed: {e}") from e
+
+    def ensure_initialized(self) -> None:
+        """
+        Ensure the system is properly initialized.
+
+        Creates necessary directories and validates configuration.
+        Call this before using the MIND system.
+        """
+        logger.info("Initializing MIND system configuration")
+
+        # Create directories
+        self.paths.ensure_directories()
+
+        # Validate all settings
+        self.validate_all()
+
+        logger.info("MIND system configuration initialized successfully")
+
+    def log_configuration(self) -> None:
+        """Log the complete system configuration."""
+        logger.info("=" * 60)
+        logger.info("MIND System Configuration")
+        logger.info("=" * 60)
+
+        # Log each subsystem
+        self.paths.validate_paths()  # Logs path info
+        self.models.log_configuration()
+        self.retrieval.log_configuration()
+        self.generation.log_configuration(local_mode=self.vllm.is_local_mode())
+        self.vllm.log_configuration()
+
+        logger.info("=" * 60)
+
+    def get_summary(self) -> str:
+        """
+        Get a concise summary of the configuration.
+
+        Returns:
+            Human-readable configuration summary
+        """
+        return (
+            f"MIND Configuration:\n"
+            f"  Base Dir: {self.paths.base_dir}\n"
+            f"  {self.models.get_model_summary()}\n"
+            f"  {self.retrieval.get_retrieval_summary()}\n"
+            f"  {self.generation.get_generation_summary()}\n"
+            f"  {self.vllm.get_vllm_summary()}"
+        )
+
+
+# Singleton pattern for global settings access
+_settings_instance: Optional[MINDSettings] = None
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> MINDSettings:
+    """
+    Get the global MINDSettings instance (singleton).
+
+    This function creates and caches a single MINDSettings instance
+    for the entire application. Subsequent calls return the same instance.
 
     Returns:
-        tuple: (embedding_device, reranker_device, device_info)
+        The global MINDSettings instance
+
+    Example:
+        >>> settings = get_settings()
+        >>> settings.ensure_initialized()
+        >>> print(settings.paths.data_dir)
     """
-    embedding_device = None
-    reranker_device = None
-    device_info_parts = []
+    global _settings_instance
 
-    # Check legacy environment variable for backward compatibility
-    force_cpu = os.environ.get('EMBEDDING_DEVICE', '').lower() == 'cpu'
-    if force_cpu:
-        print(f"[INFO] Legacy EMBEDDING_DEVICE=cpu detected, forcing CPU mode")
-        return "cpu", "cpu", "CPU forced via EMBEDDING_DEVICE environment variable"
+    if _settings_instance is None:
+        logger.info("Creating new MINDSettings instance")
+        _settings_instance = MINDSettings()
 
-    # Handle embedding device mode
-    if EMBEDDING_DEVICE_MODE == "cpu":
-        embedding_device = "cpu"
-        device_info_parts.append("Embedding: CPU (manual)")
-        print(f"[DEVICE CONFIG] Embedding device: CPU (manual selection)")
-    elif EMBEDDING_DEVICE_MODE == "cuda":
-        if torch.cuda.is_available():
-            embedding_device = "cuda"
-            device_info_parts.append("Embedding: CUDA (manual)")
-            print(f"[DEVICE CONFIG] Embedding device: CUDA (manual selection)")
-        else:
-            print(f"[WARNING] CUDA requested for embedding but not available, using CPU")
-            embedding_device = "cpu"
-            device_info_parts.append("Embedding: CPU (CUDA unavailable)")
-    # else: auto mode, will be determined below
+    return _settings_instance
 
-    # Handle reranker device mode
-    if RERANKER_DEVICE_MODE == "cpu":
-        reranker_device = "cpu"
-        device_info_parts.append("Reranker: CPU (manual)")
-        print(f"[DEVICE CONFIG] Reranker device: CPU (manual selection)")
-    elif RERANKER_DEVICE_MODE == "cuda":
-        if torch.cuda.is_available():
-            reranker_device = "cuda"
-            device_info_parts.append("Reranker: CUDA (manual)")
-            print(f"[DEVICE CONFIG] Reranker device: CUDA (manual selection)")
-        else:
-            print(f"[WARNING] CUDA requested for reranker but not available, using CPU")
-            reranker_device = "cpu"
-            device_info_parts.append("Reranker: CPU (CUDA unavailable)")
-    # else: auto mode, will be determined below
 
-    # If both devices are already determined (manual mode), return early
-    if embedding_device is not None and reranker_device is not None:
-        device_info = ", ".join(device_info_parts)
-        return embedding_device, reranker_device, device_info
+def reload_settings() -> MINDSettings:
+    """
+    Reload settings from environment/files.
 
-    # Auto mode: Check CUDA availability and memory
-    if not torch.cuda.is_available():
-        final_embedding = embedding_device if embedding_device else "cpu"
-        final_reranker = reranker_device if reranker_device else "cpu"
-        device_info_parts.append("No CUDA available")
-        return final_embedding, final_reranker, ", ".join(device_info_parts)
+    Clears the cached settings instance and creates a new one.
+    Use this if you need to reload configuration after environment changes.
 
-    # Check available GPU memory for auto mode devices
+    Returns:
+        New MINDSettings instance
+
+    Example:
+        >>> import os
+        >>> os.environ['MIND_VLLM_MODE'] = 'local'
+        >>> settings = reload_settings()
+    """
+    global _settings_instance
+
+    logger.info("Reloading settings")
+
+    # Clear cache
+    get_settings.cache_clear()
+    _settings_instance = None
+
+    # Create new instance
+    return get_settings()
+
+
+# Backward compatibility: Module-level constants
+# These provide access to settings for legacy code
+def _get_legacy_value(path: str, default=None):
+    """Helper to get nested values from settings."""
     try:
-        # CRITICAL: Use mem_get_info() which queries CUDA driver directly
-        # This shows ACTUAL free memory including vLLM usage
-        free_memory_bytes, total_memory_bytes = torch.cuda.mem_get_info(0)
-        free_memory = free_memory_bytes / (1024**3)  # Convert to GB
-        total_memory = total_memory_bytes / (1024**3)
-        used_memory = total_memory - free_memory
+        settings = get_settings()
+        parts = path.split('.')
+        value = settings
+        for part in parts:
+            value = getattr(value, part)
+        return value
+    except (AttributeError, TypeError):
+        if default is not None:
+            return default
+        raise
 
-        # Get device properties for name
-        device_props = torch.cuda.get_device_properties(0)
 
-        gpu_info = (f"GPU: {device_props.name}, Total: {total_memory:.2f}GB, "
-                   f"Used: {used_memory:.2f}GB, Free: {free_memory:.2f}GB")
+# Export commonly used values as module constants for backward compatibility
+# These will be evaluated lazily when accessed
+def __getattr__(name: str):
+    """
+    Provide backward compatibility for module-level constants.
 
-        print(f"[GPU MEMORY] {gpu_info}")
+    This allows old code like `from config.settings import BASE_DIR`
+    to continue working while using the new Pydantic-based settings.
+    """
+    # Path constants
+    if name == "BASE_DIR":
+        return _get_legacy_value("paths.base_dir")
+    elif name == "DATA_DIR":
+        return _get_legacy_value("paths.data_dir")
+    elif name == "GUIDELINE_DIR":
+        return _get_legacy_value("paths.guideline_dir")
+    elif name == "PATIENT_RECORD_DIR":
+        return _get_legacy_value("paths.patient_record_dir")
+    elif name == "GENERATED_DOCS_DIR":
+        return _get_legacy_value("paths.generated_docs_dir")
+    elif name == "GUIDELINE_DB_DIR":
+        return _get_legacy_value("paths.guideline_db_dir")
+    elif name == "PATIENT_DB_DIR":
+        return _get_legacy_value("paths.patient_db_dir")
+    elif name == "GENERATED_DOCS_DB_DIR":
+        return _get_legacy_value("paths.generated_docs_db_dir")
+    elif name == "CACHE_DIR":
+        return _get_legacy_value("paths.cache_dir")
+    elif name == "PDF_FONT_PATH":
+        return _get_legacy_value("paths.pdf_font_path")
+    elif name == "DEFAULT_OUTPUT_NAME":
+        return _get_legacy_value("paths.default_output_name")
+    elif name == "DEFAULT_PATIENT_FILE":
+        return _get_legacy_value("paths.default_patient_file")
+    elif name == "DATE_FORMATS":
+        from .paths import DATE_FORMATS as DF
+        return DF
 
-        # Memory requirements:
-        # - Embedding model (Qwen3-Embedding-0.6B): ~2.2GB
-        # - Reranker model (Qwen3-Reranker-0.6B): ~2.2GB
-        # - Safety buffer: ~0.5GB
-        # Total needed: ~5GB free
+    # Model constants
+    elif name == "EMBEDDING_MODEL_NAME":
+        return _get_legacy_value("models.embedding_model_name")
+    elif name == "RERANKER_MODEL_NAME":
+        return _get_legacy_value("models.reranker_model_name")
+    elif name == "EMBEDDING_DEVICE_MODE":
+        return _get_legacy_value("models.embedding_device_mode")
+    elif name == "RERANKER_DEVICE_MODE":
+        return _get_legacy_value("models.reranker_device_mode")
+    elif name == "BATCH_SIZE_RERANK":
+        return _get_legacy_value("models.batch_size_rerank")
 
-        MIN_FREE_MEMORY_GB = 4.5  # Minimum free memory to attempt GPU usage
+    # Retrieval constants
+    elif name == "INITIAL_RETRIEVAL_K":
+        return _get_legacy_value("retrieval.initial_retrieval_k")
+    elif name == "FINAL_RETRIEVAL_K":
+        return _get_legacy_value("retrieval.final_retrieval_k")
+    elif name == "SIMILARITY_SCORE_THRESHOLD":
+        return _get_legacy_value("retrieval.similarity_score_threshold")
+    elif name == "GUIDELINE_SEARCH_K":
+        return _get_legacy_value("retrieval.guideline_search_k")
+    elif name == "GENERATED_DOC_SEARCH_K":
+        return _get_legacy_value("retrieval.generated_doc_search_k")
+    elif name == "USE_HYBRID_MULTI_FACT_APPROACH":
+        return _get_legacy_value("retrieval.use_hybrid_multi_fact_approach")
+    elif name == "MAX_SOURCES_PER_FACT":
+        return _get_legacy_value("retrieval.max_sources_per_fact")
 
-        auto_device = None
-        if free_memory >= MIN_FREE_MEMORY_GB:
-            print(f"[GPU MEMORY] Sufficient free memory ({free_memory:.2f}GB â‰¥ {MIN_FREE_MEMORY_GB}GB)")
-            print(f"[GPU MEMORY] Auto mode will use GPU")
-            auto_device = "cuda"
-        else:
-            print(f"[GPU MEMORY] Insufficient free memory ({free_memory:.2f}GB < {MIN_FREE_MEMORY_GB}GB)")
-            print(f"[GPU MEMORY] Auto mode will use CPU")
-            if used_memory > 5.0:
-                print(f"[GPU MEMORY] vLLM using {used_memory:.2f}GB")
-                print(f"[GPU MEMORY] Consider lowering vLLM --gpu-memory-utilization to 0.70-0.75")
-            auto_device = "cpu"
+    # Generation constants
+    elif name == "TEMPERATURE":
+        return _get_legacy_value("generation.temperature")
+    elif name == "TOP_P":
+        return _get_legacy_value("generation.top_p")
+    elif name == "TOP_K":
+        return _get_legacy_value("generation.top_k")
+    elif name == "MIN_P":
+        return _get_legacy_value("generation.min_p")
+    elif name == "PRESENCE_PENALTY":
+        return _get_legacy_value("generation.presence_penalty")
+    elif name == "DEFAULT_VALIDATION_CYCLES":
+        return _get_legacy_value("generation.default_validation_cycles")
+    elif name == "MAX_VALIDATION_CYCLES":
+        return _get_legacy_value("generation.max_validation_cycles")
+    elif name == "MIN_VALIDATION_CYCLES":
+        return _get_legacy_value("generation.min_validation_cycles")
+    elif name == "MAX_AGENT_ITERATIONS":
+        return _get_legacy_value("generation.max_agent_iterations")
+    elif name == "AGENT_EARLY_STOPPING_METHOD":
+        return _get_legacy_value("generation.agent_early_stopping_method")
+    elif name == "MEMORY_MAX_TOKEN_LIMIT":
+        return _get_legacy_value("generation.memory_max_token_limit")
+    elif name == "CHAT_HISTORY_LIMIT":
+        return _get_legacy_value("generation.chat_history_limit")
 
-        # Apply auto device to models in auto mode
-        if embedding_device is None:
-            embedding_device = auto_device
-            device_info_parts.append(f"Embedding: {auto_device.upper()} (auto)")
+    # vLLM constants
+    elif name == "VLLM_MODE":
+        return _get_legacy_value("vllm.vllm_mode")
+    elif name == "VLLM_SERVER_URL":
+        return _get_legacy_value("vllm.vllm_server_url")
+    elif name == "VLLM_MODEL_NAME":
+        return _get_legacy_value("vllm.vllm_model_name")
+    elif name == "VLLM_GPU_MEMORY_UTILIZATION":
+        return _get_legacy_value("vllm.vllm_gpu_memory_utilization")
+    elif name == "VLLM_MAX_MODEL_LEN":
+        return _get_legacy_value("vllm.vllm_max_model_len")
+    elif name == "VLLM_MAX_NUM_SEQS":
+        return _get_legacy_value("vllm.vllm_max_num_seqs")
 
-        if reranker_device is None:
-            reranker_device = auto_device
-            device_info_parts.append(f"Reranker: {auto_device.upper()} (auto)")
+    # Legacy functions
+    elif name == "ensure_directories":
+        return lambda: get_settings().paths.ensure_directories()
+    elif name == "get_patient_file_path":
+        return lambda: get_settings().paths.get_patient_file_path()
 
-        device_info_parts.append(gpu_info)
-        return embedding_device, reranker_device, ", ".join(device_info_parts)
+    # Special handling for device config (removed - now handled by core/device_manager)
+    elif name == "get_device_config":
+        logger.warning(
+            "get_device_config() is deprecated and has been moved to "
+            "core/device_manager.py. Please update your imports."
+        )
+        # Return a dummy function that raises an informative error
+        def _deprecated_get_device_config():
+            raise NotImplementedError(
+                "get_device_config() has been moved to core/device_manager.py. "
+                "Import from there instead: "
+                "from core.device_manager import get_device_config"
+            )
+        return _deprecated_get_device_config
 
-    except Exception as e:
-        print(f"[WARNING] Error checking GPU memory: {e}")
-        print(f"[INFO] Auto mode defaulting to CPU for safety")
+    # Legacy device constants (will be set by core/device_manager)
+    elif name in ("EMBEDDING_DEVICE", "RERANKER_DEVICE", "DEVICE_INFO"):
+        logger.warning(
+            f"{name} is no longer set in config.settings. "
+            "Device configuration is now handled by core/device_manager.py"
+        )
+        return None
 
-        # Apply CPU to auto mode devices
-        final_embedding = embedding_device if embedding_device else "cpu"
-        final_reranker = reranker_device if reranker_device else "cpu"
-        device_info_parts.append(f"Error checking GPU: {e}")
-
-        return final_embedding, final_reranker, ", ".join(device_info_parts)
-
-# Get device configuration at startup
-EMBEDDING_DEVICE, RERANKER_DEVICE, DEVICE_INFO = get_device_config()
-print(f"[DEVICE CONFIG] Embedding: {EMBEDDING_DEVICE}, Reranker: {RERANKER_DEVICE}")
-print(f"[DEVICE INFO] {DEVICE_INFO}")
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
