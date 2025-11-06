@@ -1,112 +1,258 @@
 """
-Fact parsing and requirement extraction from guidelines using JSON output.
-Identifies what information needs to be retrieved from EHR.
+Guideline parsing and fact requirement extraction.
+
+This module parses medical guideline text to identify what specific facts
+need to be retrieved from patient records. It uses an LLM to convert
+guideline instructions into structured RequiredFact objects with optimized
+search queries for RAG retrieval.
+
+The parser also extracts format instructions and note type filters from
+guidelines to guide the generation process.
+
+Example:
+    >>> parser = GuidelineFactParser()
+    >>> requirements = parser.parse_subsection_requirements(
+    ...     section_title="Treatment Plan",
+    ...     subsection_title="Current Medications",
+    ...     subsection_guidelines="List all current medications..."
+    ... )
+    >>> print(f"Found {len(requirements.required_facts)} facts to retrieve")
 """
 
-from typing import List, Dict
-from dataclasses import dataclass
+import logging
 import json
 import re
+from typing import List, Dict, Optional
 
+from generation.models import RequiredFact, SubsectionRequirements, FactPriority
+from generation.constants import (
+    GUIDELINE_PARSING_PROMPT_TEMPLATE,
+    NOTE_TYPES_PATTERN
+)
+from generation.exceptions import FactParsingError
 from config.llm_config import llm_config
 from utils.error_handling import safe_llm_invoke
 
-
-@dataclass
-class RequiredFact:
-    """Represents a single fact that needs to be found in EHR"""
-    description: str  # What to look for
-    priority: str  # "required" or "optional"
-    search_query: str  # Optimized RAG query for this fact
-    note_types: List[str] = None # Allowed note types for this fact
-
-
-@dataclass
-class SubsectionRequirements:
-    """Structured requirements for a subsection"""
-    subsection_title: str
-    required_facts: List[RequiredFact]
-    format_instructions: str
-    complexity_score: int  # 0-10, based on number of facts
-    note_types: List[str] = None  # Note types for entire subsection
+# Configure module logger
+logger = logging.getLogger(__name__)
 
 
 class GuidelineFactParser:
-    """Parses guidelines to extract factual requirements using JSON"""
-    
-    def __init__(self):
-        self.llm = llm_config.llm_retrieve
+    """Parses medical guidelines to extract factual requirements.
 
-    def _extract_note_types(self, subsection_guidelines: str) -> List[str]:
-        """
-        Extract NOTE_TYPES from guideline text.
-        
+    The parser analyzes guideline text and identifies:
+    1. What specific facts need to be retrieved from patient records
+    2. Optimized search queries for RAG retrieval
+    3. Note type filters to improve retrieval accuracy
+    4. Format instructions for how to present the information
+
+    The parser uses JSON-based LLM output for structured, reliable parsing.
+
+    Attributes:
+        llm: Language model instance for parsing (retrieval-optimized model)
+
+    Example:
+        >>> parser = GuidelineFactParser()
+        >>> guidelines = '''
+        ... List current medications. Include dosage and frequency.
+        ... [NOTE_TYPES: Medical Note, Prescription]
+        ... '''
+        >>> requirements = parser.parse_subsection_requirements(
+        ...     section_title="Treatment",
+        ...     subsection_title="Medications",
+        ...     subsection_guidelines=guidelines
+        ... )
+        >>> for fact in requirements.required_facts:
+        ...     print(f"Fact: {fact.description}")
+        ...     print(f"Query: {fact.search_query}")
+    """
+
+    def __init__(self):
+        """Initialize the guideline parser with the retrieval LLM."""
+        self.llm = llm_config.llm_retrieve
+        logger.debug("GuidelineFactParser initialized with retrieval LLM")
+
+    def parse_subsection_requirements(
+        self,
+        section_title: str,
+        subsection_title: str,
+        subsection_guidelines: str
+    ) -> SubsectionRequirements:
+        """Parse guideline text to extract required facts and instructions.
+
+        This method analyzes guideline text and produces a structured
+        SubsectionRequirements object containing all facts that need to
+        be answered and formatting instructions.
+
         Args:
-            subsection_guidelines: Guideline text
-            
+            section_title: Title of the parent section
+            subsection_title: Title of this subsection
+            subsection_guidelines: Raw guideline text to parse
+
         Returns:
-            List of note types, or None if [NOTE_TYPES: ALL]
+            SubsectionRequirements with structured fact list and instructions
+
+        Raises:
+            FactParsingError: If parsing fails critically
+
+        Example:
+            >>> parser = GuidelineFactParser()
+            >>> requirements = parser.parse_subsection_requirements(
+            ...     section_title="Medical History",
+            ...     subsection_title="Chronic Conditions",
+            ...     subsection_guidelines="List all chronic conditions..."
+            ... )
+            >>> print(requirements.complexity_score)
+            5
         """
-        # Pattern: [NOTE_TYPES: type1, type2, type3] or [NOTE_TYPES: ALL]
-        pattern = r'\[NOTE_TYPES:\s*([^\]]+)\]'
-        match = re.search(pattern, subsection_guidelines, re.IGNORECASE)
-        
+        logger.info(f"Parsing requirements for subsection: '{subsection_title}'")
+
+        try:
+            # STEP 1: Extract note types for hardcoded filtering
+            note_types = self._extract_note_types(subsection_guidelines)
+
+            # STEP 2: Remove NOTE_TYPES markers from text before sending to LLM
+            # These markers are for hardcoded filtering, not LLM processing
+            cleaned_guidelines = self._remove_note_types_marker(subsection_guidelines)
+
+            # STEP 3: Call LLM to parse facts using JSON output
+            requirements = self._parse_with_llm(
+                section_title=section_title,
+                subsection_title=subsection_title,
+                cleaned_guidelines=cleaned_guidelines,
+                note_types=note_types
+            )
+
+            if not requirements:
+                logger.warning(
+                    f"LLM parsing failed for '{subsection_title}', using fallback"
+                )
+                return self._create_fallback_requirements(
+                    subsection_title, subsection_guidelines, note_types
+                )
+
+            logger.info(
+                f"Successfully parsed {len(requirements.required_facts)} facts "
+                f"for '{subsection_title}'"
+            )
+            return requirements
+
+        except Exception as e:
+            logger.error(
+                f"Critical parsing failure for '{subsection_title}': {e}",
+                exc_info=True
+            )
+            return self._create_fallback_requirements(
+                subsection_title, subsection_guidelines, note_types
+            )
+
+    def _extract_note_types(self, subsection_guidelines: str) -> Optional[List[str]]:
+        """Extract NOTE_TYPES marker from guideline text.
+
+        Looks for patterns like:
+        - [NOTE_TYPES: Medical Note, Nursing Note]
+        - [NOTE_TYPES: ALL]
+
+        Args:
+            subsection_guidelines: Raw guideline text
+
+        Returns:
+            List of note types, or None if [NOTE_TYPES: ALL] or not found
+
+        Example:
+            >>> parser = GuidelineFactParser()
+            >>> text = "Find medication [NOTE_TYPES: Medical Note, Prescription]"
+            >>> note_types = parser._extract_note_types(text)
+            >>> print(note_types)
+            ['Medical Note', 'Prescription']
+        """
+        match = re.search(NOTE_TYPES_PATTERN, subsection_guidelines, re.IGNORECASE)
+
         if not match:
-            print("[INFO] No NOTE_TYPES found, defaulting to ALL")
+            logger.debug("No NOTE_TYPES found, defaulting to ALL")
             return None  # No restriction = search all
-        
+
         note_types_str = match.group(1).strip()
-        
+
         # Check for ALL keyword
         if note_types_str.upper() == 'ALL':
-            print("[INFO] NOTE_TYPES: ALL - no filtering")
+            logger.debug("NOTE_TYPES: ALL - no filtering")
             return None  # None = search all note types
-        
+
         # Parse comma-separated list
         note_types = [nt.strip() for nt in note_types_str.split(',')]
         note_types = [nt for nt in note_types if nt]  # Remove empty strings
-        
-        print(f"[INFO] NOTE_TYPES extracted: {note_types}")
-        return note_types if note_types else None
-    
+
+        if note_types:
+            logger.debug(f"NOTE_TYPES extracted: {note_types}")
+            return note_types
+        else:
+            logger.debug("Empty NOTE_TYPES list, defaulting to ALL")
+            return None
+
     def _remove_note_types_marker(self, subsection_guidelines: str) -> str:
-        """
-        Remove [NOTE_TYPES: ...] markers from guideline text.
-        
-        These markers are used for hardcoded filtering and should not be sent to the LLM
-        as they might confuse the query generation process.
-        
+        """Remove [NOTE_TYPES: ...] markers from guideline text.
+
+        These markers are used for hardcoded filtering and should not be
+        sent to the LLM as they might confuse query generation.
+
         Args:
             subsection_guidelines: Guideline text with possible NOTE_TYPES markers
-            
+
         Returns:
             Cleaned guideline text without NOTE_TYPES markers
+
+        Example:
+            >>> parser = GuidelineFactParser()
+            >>> text = "Find meds [NOTE_TYPES: Medical] in records"
+            >>> cleaned = parser._remove_note_types_marker(text)
+            >>> print(cleaned)
+            Find meds  in records
         """
-        # Pattern: [NOTE_TYPES: type1, type2, type3] or [NOTE_TYPES: ALL]
-        pattern = r'\[NOTE_TYPES:\s*[^\]]+\]'
-        cleaned_text = re.sub(pattern, '', subsection_guidelines, flags=re.IGNORECASE)
-        
-        # Clean up any extra whitespace left behind
-        cleaned_text = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned_text)  # Multiple blank lines -> double
+        # Remove NOTE_TYPES markers
+        cleaned_text = re.sub(
+            NOTE_TYPES_PATTERN,
+            '',
+            subsection_guidelines,
+            flags=re.IGNORECASE
+        )
+
+        # Clean up extra whitespace left behind
+        cleaned_text = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned_text)
         cleaned_text = cleaned_text.strip()
-        
+
         return cleaned_text
-    
-    def parse_subsection_requirements(self, 
-                                     section_title: str,
-                                     subsection_title: str,
-                                     subsection_guidelines: str) -> SubsectionRequirements:
-        """
-        Parse guideline text to extract required facts using JSON.
-        
+
+    def _parse_with_llm(
+        self,
+        section_title: str,
+        subsection_title: str,
+        cleaned_guidelines: str,
+        note_types: Optional[List[str]]
+    ) -> Optional[SubsectionRequirements]:
+        """Use LLM to parse guidelines into structured requirements.
+
         Args:
             section_title: Parent section title
             subsection_title: Subsection title
-            subsection_guidelines: The guideline text to parse
-            
+            cleaned_guidelines: Guidelines with NOTE_TYPES markers removed
+            note_types: Extracted note types for filtering
+
         Returns:
-            SubsectionRequirements with structured fact list
+            SubsectionRequirements if successful, None otherwise
+
+        Example:
+            >>> requirements = parser._parse_with_llm(
+            ...     "Treatment", "Medications", "List current meds", None
+            ... )
         """
+        # Build parsing prompt
+        parsing_prompt = GUIDELINE_PARSING_PROMPT_TEMPLATE.format(
+            section_title=section_title,
+            subsection_title=subsection_title,
+            cleaned_guidelines=cleaned_guidelines
+        )
+
         
         print(f"[INFO] Parsing requirements for '{subsection_title}'")
 
@@ -181,65 +327,85 @@ Returner KUN valid JSON - ingen forklaring før eller efter!
 """
         
         try:
-            # Use safe LLM invoke with retry
+            # Call LLM with retry logic
             response = safe_llm_invoke(
-                parsing_prompt,
-                self.llm,
+                prompt=parsing_prompt,
+                llm=self.llm,
                 max_retries=3,
                 fallback_response=None,
                 operation="guideline_parsing"
             )
-            
-            if not response or not response.strip():
-                print(f"[ERROR] Empty response from LLM - using fallback")
-                return self._create_fallback_requirements(subsection_title, subsection_guidelines, note_types)
-            
-            # Parse JSON response
-            requirements = self._parse_json_response(response, section_title, subsection_title, note_types)
-            
-            if not requirements:
-                print(f"[ERROR] Failed to parse JSON - using fallback")
-                return self._create_fallback_requirements(subsection_title, subsection_guidelines, note_types)
-            
-            return requirements
-        
-        except Exception as e:
-            print(f"[CRITICAL] Fact parsing completely failed: {str(e)}")
-            return self._create_fallback_requirements(subsection_title, subsection_guidelines, note_types)
 
-    def _parse_json_response(self, 
-                            response: str, 
-                            section_title: str,
-                            subsection_title: str,
-                            note_types: List[str]) -> SubsectionRequirements:
-        """Parse JSON response from LLM"""
-        
+            if not response or not response.strip():
+                logger.error("Empty response from LLM")
+                return None
+
+            # Parse JSON response
+            requirements = self._parse_json_response(
+                response=response,
+                section_title=section_title,
+                subsection_title=subsection_title,
+                note_types=note_types
+            )
+
+            return requirements
+
+        except Exception as e:
+            logger.error(f"LLM invocation failed: {e}", exc_info=True)
+            return None
+
+    def _parse_json_response(
+        self,
+        response: str,
+        section_title: str,
+        subsection_title: str,
+        note_types: Optional[List[str]]
+    ) -> Optional[SubsectionRequirements]:
+        """Parse JSON response from LLM into SubsectionRequirements.
+
+        Args:
+            response: Raw LLM response (should contain JSON)
+            section_title: Parent section title
+            subsection_title: Subsection title
+            note_types: Note types for filtering
+
+        Returns:
+            SubsectionRequirements if parsing succeeds, None otherwise
+
+        Example:
+            >>> response = '{"required_facts": [...], "format_instructions": "..."}'
+            >>> requirements = parser._parse_json_response(
+            ...     response, "Treatment", "Medications", None
+            ... )
+        """
         # Extract JSON from response (in case LLM added extra text)
         response_clean = response.strip()
-        
+
         # Find JSON block
         start_idx = response_clean.find('{')
         end_idx = response_clean.rfind('}')
-        
+
         if start_idx == -1 or end_idx == -1:
-            print("[ERROR] No JSON found in response")
-            print(f"[DEBUG] Response preview: {response[:200]}")
+            logger.error("No JSON found in LLM response")
+            logger.debug(f"Response preview: {response[:200]}")
             return None
-        
-        json_str = response_clean[start_idx:end_idx+1]
-        
+
+        json_str = response_clean[start_idx:end_idx + 1]
+
         try:
             data = json.loads(json_str)
-            
+
             # Validate required fields
             if 'required_facts' not in data:
-                print("[ERROR] Missing 'required_facts' in JSON")
+                logger.error("Missing 'required_facts' in JSON response")
                 return None
-            
+
             # Parse required facts
             required_facts = []
             for fact_data in data.get('required_facts', []):
-                fact = self._create_fact_from_json(fact_data, section_title, subsection_title, note_types)
+                fact = self._create_fact_from_json(
+                    fact_data, section_title, subsection_title, note_types
+                )
                 if fact:
                     required_facts.append(fact)
 
@@ -247,60 +413,106 @@ Returner KUN valid JSON - ingen forklaring før eller efter!
             format_instructions = data.get('format_instructions', '')
 
             # Calculate complexity
-            complexity = len(required_facts)
+            complexity = min(len(required_facts), 10)
 
-            print(f"[SUCCESS] Parsed {len(required_facts)} required facts")
+            logger.info(f"Successfully parsed {len(required_facts)} required facts")
 
             return SubsectionRequirements(
                 subsection_title=subsection_title,
                 required_facts=required_facts,
                 format_instructions=format_instructions,
-                complexity_score=min(complexity, 10),
+                complexity_score=complexity,
                 note_types=note_types
             )
-            
-        except json.JSONDecodeError as e:
-            print(f"[ERROR] Failed to parse JSON: {str(e)}")
-            print(f"[DEBUG] JSON string: {json_str[:300]}")
-            return None
-    
-    def _create_fact_from_json(self,
-                               fact_data: Dict,
-                               section_title: str,
-                               subsection_title: str,
-                               note_types: List[str]) -> RequiredFact:
-        """Create RequiredFact from JSON data"""
 
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON: {e}")
+            logger.debug(f"JSON string: {json_str[:300]}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error parsing JSON: {e}", exc_info=True)
+            return None
+
+    def _create_fact_from_json(
+        self,
+        fact_data: Dict,
+        section_title: str,
+        subsection_title: str,
+        note_types: Optional[List[str]]
+    ) -> Optional[RequiredFact]:
+        """Create RequiredFact object from JSON fact data.
+
+        Args:
+            fact_data: Dictionary with fact information from JSON
+            section_title: Parent section title (for context)
+            subsection_title: Subsection title (for context)
+            note_types: Note types for this fact
+
+        Returns:
+            RequiredFact if creation succeeds, None otherwise
+
+        Example:
+            >>> fact_data = {
+            ...     "description": "Current medications",
+            ...     "search_query": "medications current treatment"
+            ... }
+            >>> fact = parser._create_fact_from_json(
+            ...     fact_data, "Treatment", "Medications", None
+            ... )
+            >>> print(fact.description)
+            Current medications
+        """
         try:
             description = fact_data.get('description', '').strip()
             search_query = fact_data.get('search_query', description).strip()
 
             if not description:
+                logger.warning("Skipping fact with empty description")
                 return None
 
             return RequiredFact(
                 description=description,
-                priority="required",
+                priority=FactPriority.REQUIRED,
                 search_query=search_query,
                 note_types=note_types
             )
 
         except Exception as e:
-            print(f"[ERROR] Failed to create fact from JSON: {e}")
+            logger.error(f"Failed to create fact from JSON: {e}")
             return None
-    
-    def _create_fallback_requirements(self,
-                                     subsection_title: str,
-                                     subsection_guidelines: str,
-                                     note_types: List[str]) -> SubsectionRequirements:
-        """Create minimal requirements when parsing fails"""
 
-        print(f"[FALLBACK] Creating minimal requirements for '{subsection_title}'")
+    def _create_fallback_requirements(
+        self,
+        subsection_title: str,
+        subsection_guidelines: str,
+        note_types: Optional[List[str]]
+    ) -> SubsectionRequirements:
+        """Create minimal fallback requirements when parsing fails.
+
+        This provides a degraded but functional fallback that allows
+        generation to proceed even when guideline parsing fails.
+
+        Args:
+            subsection_title: Subsection title
+            subsection_guidelines: Raw guideline text
+            note_types: Note types for filtering
+
+        Returns:
+            SubsectionRequirements with single generic fact
+
+        Example:
+            >>> requirements = parser._create_fallback_requirements(
+            ...     "Medications", "List medications", None
+            ... )
+            >>> print(len(requirements.required_facts))
+            1
+        """
+        logger.warning(f"Creating fallback requirements for '{subsection_title}'")
 
         # Create single generic fact
         fallback_fact = RequiredFact(
             description=f"Information relateret til {subsection_title}",
-            priority="required",
+            priority=FactPriority.REQUIRED,
             search_query=subsection_title.lower(),
             note_types=note_types
         )
@@ -308,7 +520,7 @@ Returner KUN valid JSON - ingen forklaring før eller efter!
         return SubsectionRequirements(
             subsection_title=subsection_title,
             required_facts=[fallback_fact],
-            format_instructions=subsection_guidelines[:200],
+            format_instructions=subsection_guidelines[:200],  # First 200 chars
             complexity_score=1,
             note_types=note_types
         )
