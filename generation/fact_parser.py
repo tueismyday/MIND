@@ -136,6 +136,11 @@ VIGTIGT - Håndter følgende:
 2. Når der står "Brug X notat", betyder det der skal søge i den notetype
 3. FORMAT KRAV skal indeholde instruktioner om HVORDAN der skal svares (f.eks. "besvar kort", "pas på ikke at konkludere", "giv bedste bud")
 4. Lister med "f.eks." betyder ALLE eksemplerne er potentielle fakta
+5. Når du laver "search_query", skal du optimere søgestrengen til RAG:
+   - Brug præcise og beskrivende nøgleord
+   - Undgå generiske ord (som “patienten”, “hvis”, “skal”)
+   - Medtag synonymer og fagtermer fra konteksten
+   - Sørg for at søgestrengen fungerer for både semantisk og nøgleordsbaseret søgning
 
 ## OUTPUT FORMAT - DU SKAL RETURNERE JSON ##
 
