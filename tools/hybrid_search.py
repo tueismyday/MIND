@@ -1,6 +1,14 @@
 """
 Enhanced lightweight in-memory hybrid search implementation with Reciprocal Rank Fusion (RRF).
-Combines semantic search with BM25 keyword search using RRF instead of simple weighted combination.
+
+TWO-STAGE APPROACH:
+Stage 1 (Filtering): RRF combines semantic + keyword search to narrow document corpus
+Stage 2 (Ranking): Cross-encoder + recency provide fresh scoring of filtered candidates
+
+SCORING:
+- Stage 1: RRF normalizes to 0-100 (used for filtering only, not final ranking)
+- Stage 2: Cross-encoder (0-30) + Recency boost (0-10) = Total (0-40)
+- Recency boost calculated relative to most recent DB entry (not current date)
 """
 
 import numpy as np
@@ -11,7 +19,7 @@ from sentence_transformers import CrossEncoder
 import re
 from datetime import datetime
 
-from config.settings import RERANKER_MODEL_NAME, RERANKER_DEVICE
+from config.settings import RERANKER_MODEL_NAME, RERANKER_DEVICE, BATCH_SIZE_RERANK
 from core.reranker import get_reranker
 from utils.text_processing import parse_date_safe
 import torch
@@ -34,6 +42,19 @@ class RRFHybridSearch:
         self.documents = []
         self.embeddings = None
         self.bm25 = None
+        self.most_recent_date = None  # NEW: Track most recent date in DB
+        
+        # Danish stopwords for better keyword matching
+        self.danish_stopwords = {
+            'og', 'i', 'jeg', 'det', 'at', 'en', 'den', 'til', 'er', 'som', 
+            'på', 'de', 'med', 'han', 'af', 'for', 'ikke', 'der', 'var', 'mig',
+            'sig', 'men', 'et', 'har', 'om', 'vi', 'min', 'havde', 'ham', 'hun',
+            'nu', 'over', 'da', 'fra', 'du', 'ud', 'sin', 'dem', 'os', 'op',
+            'man', 'hans', 'hvor', 'eller', 'hvad', 'skal', 'selv', 'her',
+            'alle', 'vil', 'blev', 'kunne', 'ind', 'når', 'være', 'dog', 'noget',
+            'havde', 'mod', 'disse', 'hvis', 'din', 'nogle', 'hos', 'blive',
+            'mange', 'ad', 'bliver', 'hendes', 'været', 'thi', 'jer', 'sådan'
+        }
 
         print(f"[INFO] Loading cross-encoder: {RERANKER_MODEL_NAME}")
         print(f"[INFO] Target device: {RERANKER_DEVICE}")
@@ -55,17 +76,6 @@ class RRFHybridSearch:
         # Simply delegate to the core reranker module
         return get_reranker()
         
-        # Danish stopwords for better keyword matching
-        self.danish_stopwords = {
-            'og', 'i', 'jeg', 'det', 'at', 'en', 'den', 'til', 'er', 'som', 
-            'på', 'de', 'med', 'han', 'af', 'for', 'ikke', 'der', 'var', 'mig',
-            'sig', 'men', 'et', 'har', 'om', 'vi', 'min', 'havde', 'ham', 'hun',
-            'nu', 'over', 'da', 'fra', 'du', 'ud', 'sin', 'dem', 'os', 'op',
-            'man', 'hans', 'hvor', 'eller', 'hvad', 'skal', 'selv', 'her',
-            'alle', 'vil', 'blev', 'kunne', 'ind', 'når', 'være', 'dog', 'noget',
-            'havde', 'mod', 'disse', 'hvis', 'din', 'nogle', 'hos', 'blive',
-            'mange', 'ad', 'bliver', 'hendes', 'været', 'thi', 'jer', 'sådan'
-        }
     
     def index_documents(self, documents: List[Dict]):
         """
@@ -76,6 +86,9 @@ class RRFHybridSearch:
         """
         
         self.documents = documents
+        
+        # NEW: Find the most recent date in the database
+        self._update_most_recent_date()
         
         # Prepare content for indexing
         contents = [doc['content'] for doc in documents]
@@ -92,6 +105,34 @@ class RRFHybridSearch:
         self.bm25 = BM25Okapi(tokenized_docs)
         
         print(f"[INFO] RRF hybrid search index ready (k={self.k})")
+        if self.most_recent_date:
+            print(f"[INFO] Most recent entry date: {self.most_recent_date.strftime('%Y-%m-%d')}")
+    
+    def _update_most_recent_date(self):
+        """
+        Find and store the most recent date in the document database.
+        This is used as the reference point for recency calculations.
+        """
+        most_recent = None
+        
+        for doc in self.documents:
+            date_str = doc.get('date', '')
+            if not date_str:
+                continue
+            
+            try:
+                doc_date = parse_date_safe(date_str)
+                # Only consider past dates (ignore future dates which might be typos or appointments)
+                if doc_date <= datetime.now():
+                    if most_recent is None or doc_date > most_recent:
+                        most_recent = doc_date
+            except:
+                continue
+        
+        self.most_recent_date = most_recent
+        
+        if not most_recent:
+            print("[WARNING] No valid dates found in documents - recency boost will be disabled")
     
     def _tokenize_danish_medical(self, text: str) -> List[str]:
         """
@@ -235,6 +276,38 @@ class RRFHybridSearch:
         
         return [(result['doc_idx'], result['rrf_score']) for result in sorted_results]
     
+    def _normalize_rrf_scores_to_100(self, rrf_scores: List[Tuple[int, float]]) -> Dict[int, float]:
+        """
+        Normalize RRF scores to 0-100 scale.
+        
+        Args:
+            rrf_scores: List of (doc_idx, rrf_score) tuples
+            
+        Returns:
+            Dictionary mapping doc_idx to normalized score (0-100)
+        """
+        if not rrf_scores:
+            return {}
+        
+        scores_array = np.array([score for _, score in rrf_scores])
+        min_score = scores_array.min()
+        max_score = scores_array.max()
+        
+        # Normalize to 0-100
+        score_range = max_score - min_score
+        if score_range < 1e-6:
+            # All scores are the same
+            print("[DEBUG] All RRF scores are the same")
+            normalized_scores = np.full_like(scores_array, 50.0)  # Give them all mid-range score
+        else:
+            normalized_scores = ((scores_array - min_score) / score_range) * 100.0
+        
+        result = {}
+        for i, (doc_idx, _) in enumerate(rrf_scores):
+            result[doc_idx] = float(normalized_scores[i])
+        
+        return result
+    
     def rrf_search(self, query: str, top_k: int = 15, 
                    rank_window: int = 100,
                    semantic_window: int = None,
@@ -242,25 +315,38 @@ class RRFHybridSearch:
                    enable_boosting: bool = True,
                     note_types: List[str] = None) -> List[Dict]:
         """
-        Perform hybrid search using Reciprocal Rank Fusion with cross-encoder reranking.
+        Perform hybrid search using TWO-STAGE approach:
+        
+        Stage 1 (Filtering): RRF narrows documents from full corpus to top candidates
+        Stage 2 (Ranking): Cross-encoder + recency provide fresh scoring of candidates
         
         Args:
             query: Search query
             top_k: Number of final results to return
-            rank_window: Window size for RRF calculation (default: 150)
+            rank_window: Window size for RRF calculation (default: 100)
             semantic_window: Window size for semantic ranking (None = use all)
             keyword_window: Window size for keyword ranking (None = use all)
-            enable_boosting: Whether to apply cross-encoder and recency boosting
+            enable_boosting: Whether to apply cross-encoder and recency scoring (Stage 2)
             
         Returns:
-            List of search results with RRF scores and detailed ranking information
+            List of search results with detailed ranking information
+            
+        Two-Stage Scoring:
+            Stage 1 - RRF Filtering: Narrows corpus using semantic + keyword fusion
+            Stage 2 - Fresh Scoring (when enable_boosting=True):
+                - Cross-encoder: 0-90 (neural relevance scoring)
+                - Recency: 0-10 (temporal relevance)
+                - Total: 0-100 max
+            
+            If enable_boosting=False: Falls back to RRF scores (0-100)
         """
         
         if not self.documents or self.embeddings is None or self.bm25 is None:
             return []
         
         print(f"[INFO] Performing RRF search (k={self.k}, rank_window={rank_window})")
-        
+
+        # Stage 1 - RRF Filtering: Narrows corpus using semantic + keyword fusion
         # Get individual rankings
         semantic_ranking = self._get_semantic_ranking(query, semantic_window, note_types)
         keyword_ranking = self._get_keyword_ranking(query, keyword_window, note_types)
@@ -276,10 +362,17 @@ class RRFHybridSearch:
         
         print(f"[INFO] RRF fusion: {len(rrf_ranking)} results")
         
-        rerank_window = min(len(rrf_ranking), top_k * 3)
+        # Normalize RRF scores to 0-100 scale
+        normalized_rrf = self._normalize_rrf_scores_to_100(rrf_ranking)
+        
+        if len(rrf_ranking) < 10:
+            rerank_window = len(rrf_ranking)  # Rerank all if less than 10
+        else:
+            rerank_window = max(10, len(rrf_ranking) // 2)  # Half, but minimum 10
+        
         top_candidates = rrf_ranking[:rerank_window]
         
-        print(f"[INFO] Applying cross-encoder reranking to top {rerank_window} candidates")
+        print(f"[INFO] Applying cross-encoder reranking to top {rerank_window} candidates ({rerank_window}/{len(rrf_ranking)})")
         
         cross_encoder_scores = {}
         if enable_boosting and top_candidates:
@@ -291,7 +384,7 @@ class RRFHybridSearch:
             print(f"[INFO] Cross-encoder scoring complete")
         
         results = []
-        for doc_idx, rrf_score in top_candidates:
+        for doc_idx, raw_rrf_score in top_candidates:
             doc = self.documents[doc_idx]
             
             semantic_score = next((score for idx, score in semantic_ranking if idx == doc_idx), 0.0)
@@ -300,17 +393,25 @@ class RRFHybridSearch:
             semantic_rank = next((rank for rank, (idx, _) in enumerate(semantic_ranking, 1) if idx == doc_idx), None)
             keyword_rank = next((rank for rank, (idx, _) in enumerate(keyword_ranking, 1) if idx == doc_idx), None)
             
-            final_score = rrf_score
+            # Get normalized RRF score (0-100)
+            rrf_score_normalized = normalized_rrf.get(doc_idx, 0.0)
             
+            # STAGE 2: Fresh scoring with cross-encoder + recency only
             cross_encoder_score = 0.0
             recency_boost = 0.0
             
             if enable_boosting:
+                # Cross-encoder: 0-90 range (primary relevance signal in Stage 2)
                 cross_encoder_score = cross_encoder_scores.get(doc_idx, 0.0)
-                final_score += cross_encoder_score
                 
+                # Recency: 0-10 range (temporal relevance signal in Stage 2)
                 recency_boost = self._calculate_recency_boost(doc.get('date', ''))
-                final_score += recency_boost
+                
+                # Final score: ONLY cross-encoder + recency (RRF score discarded after filtering)
+                final_score = cross_encoder_score + recency_boost  # Max: 100
+            else:
+                # Fallback: If boosting disabled, use RRF score for ranking
+                final_score = rrf_score_normalized
             
             result = {
                 'content': doc.get('content', ''),
@@ -320,7 +421,8 @@ class RRFHybridSearch:
                 'chunk_index': doc.get('chunk_index', 0),
 
                 'score': final_score,
-                'rrf_score': rrf_score,
+                'rrf_score': rrf_score_normalized, 
+                'raw_rrf_score': raw_rrf_score,     # Original RRF score for debugging
 
                 'semantic_score': semantic_score,
                 'keyword_score': keyword_score,
@@ -328,8 +430,8 @@ class RRFHybridSearch:
                 'semantic_rank': semantic_rank,
                 'keyword_rank': keyword_rank,
 
-                'cross_encoder_score': cross_encoder_score,
-                'recency_boost': recency_boost,
+                'cross_encoder_score': cross_encoder_score, 
+                'recency_boost': recency_boost,              
 
                 'rrf_k': self.k,
                 'rank_window': rank_window
@@ -337,10 +439,11 @@ class RRFHybridSearch:
             
             results.append(result)
         
+        # Sort by final score (cross-encoder + recency in Stage 2)
         results.sort(key=lambda x: x['score'], reverse=True)
         return results[:top_k]
     
-    def _calculate_cross_encoder_scores(self, query: str, documents: List[Tuple[int, Dict]]) -> Dict[int, float]:
+    def _calculate_cross_encoder_scores(self, query: str, documents: List[Tuple[int, Dict]], batch_size:int = BATCH_SIZE_RERANK) -> Dict[int, float]:
         """
         Calculate cross-encoder relevance scores for a batch of documents.
         
@@ -349,26 +452,29 @@ class RRFHybridSearch:
             documents: List of (doc_idx, doc_dict) tuples to score
             
         Returns:
-            Dictionary mapping doc_idx to normalized relevance score (0-0.3 range)
+            Dictionary mapping doc_idx to normalized relevance score (0-30 range)
         """
         if not documents:
             return {}
         
         query_doc_pairs = [(query, doc['content']) for _, doc in documents]
         
-        raw_scores = self.cross_encoder.predict(query_doc_pairs, batch_size=1)
+        # Get raw cross-encoder scores
+        raw_scores = self.cross_encoder.predict(query_doc_pairs, batch_size=batch_size, show_progress_bar = True)
         
         scores_array = np.array(raw_scores)
         min_score = scores_array.min()
         max_score = scores_array.max()
         
+        # Normalize to 0-1 range
         score_range = max_score - min_score
         if score_range < 1e-6:
             normalized_scores = np.zeros_like(scores_array)
         else:
             normalized_scores = (scores_array - min_score) / score_range
         
-        scaled_scores = normalized_scores * 0.05
+        # Scale to 0-90 range
+        scaled_scores = normalized_scores * 90.0
         
         result = {}
         for i, (doc_idx, _) in enumerate(documents):
@@ -377,23 +483,32 @@ class RRFHybridSearch:
         return result
     
     def _calculate_recency_boost(self, date_str: str) -> float:
-        """Calculate recency boost - ONLY for past dates"""
-        if not date_str:
+        """
+        Calculate recency boost with EXPONENTIAL decay.
+        Creates a strong preference for recent entries.
+        """
+        if not date_str or not self.most_recent_date:
             return 0.0
         
         try:
             doc_date = parse_date_safe(date_str)
             now = datetime.now()
             
-            # CRITICAL: Ignore future dates (appointments, typos, etc.)
             if doc_date > now:
-                print(f"[WARNING] Future date detected: {date_str} - ignoring for recency boost")
                 return 0.0
             
-            days_ago = (now - doc_date).days
-            recency_bonus = max(0, 0.03 - (days_ago / 365.0) * 0.03)
-            return recency_bonus
-        except:
+            days_since_most_recent = (self.most_recent_date - doc_date).days
+            
+            if days_since_most_recent < 0:
+                return 10.0
+            
+            # decay_constant controls steepness (smaller = steeper)
+            decay_constant = 3
+            recency_boost = 10.0 * np.exp(-days_since_most_recent / decay_constant)
+            
+            return max(0.0, recency_boost)
+            
+        except Exception as e:
             return 0.0
     
     def explain_rrf_score(self, doc_idx: int, query: str, rank_window: int = 150) -> Dict:
@@ -498,7 +613,7 @@ class RRFHybridRetriever:
             print(f"[ERROR] Failed to initialize RRF search: {e}")
             raise
     
-    def retrieve_with_sources(self, query: str, max_references: int = 3, 
+    def retrieve_with_sources(self, query: str, max_sources: int = 3, 
                             rank_window: int = 150,
                             enable_explanation: bool = False,
                             note_types: List[str] = None) -> Tuple[str, List[Dict]]:
@@ -507,7 +622,7 @@ class RRFHybridRetriever:
         
         Args:
             query: Search query
-            max_references: Maximum number of results to return
+            max_sources: Maximum number of results to return
             rank_window: RRF rank window size
             enable_explanation: Whether to include RRF score explanations
             
@@ -518,18 +633,19 @@ class RRFHybridRetriever:
         # Perform RRF search
         results = self.rrf_search.rrf_search(
             query, 
-            top_k=max_references * 2,  # Get more results for better selection
+            top_k=max_sources * 2,  # Get more results for better selection
             rank_window=rank_window,
             note_types=note_types
         )
         
         # Convert to source format
         sources = []
-        content_parts = ["# Patientoplysninger (RRF Hybrid Search)\n"]
-        content_parts.append(f"*RRF sÃ¸gning fandt {len(results)} relevante kilder (k={self.rrf_search.k}).*\n")
+        content_parts = ["# Patientoplysninger (RRF Hybrid Search - Two-Stage Approach)\n"]
+        content_parts.append(f"*Stage 1: RRF filtering | Stage 2: Cross-encoder + Recency scoring*\n")
+        content_parts.append("*Score Scale: Cross-Encoder (0-30) + Recency (0-10) = Total (0-40)*\n")
         
-        for i, result in enumerate(results[:max_references]):
-            # Calculate relevance percentage
+        for i, result in enumerate(results[:max_sources]):
+            # Calculate relevance percentage based on normalized total score
             max_score = results[0]['score'] if results else 1
             relevance = int((result['score'] / max_score) * 100) if max_score > 0 else 0
             
@@ -541,14 +657,15 @@ class RRFHybridRetriever:
                 'snippet': result['content'][:150],
                 'full_content': result['content'],
 
-                # RRF-specific details
-                'rrf_score': result['rrf_score'],
+                # RRF-specific details (normalized)
+                'rrf_score': result['rrf_score'],          # 0-100
+                'raw_rrf_score': result['raw_rrf_score'],  # Original
                 'semantic_score': result['semantic_score'],
                 'keyword_score': result['keyword_score'],
                 'semantic_rank': result['semantic_rank'],
                 'keyword_rank': result['keyword_rank'],
-                'cross_encoder_score': result['cross_encoder_score'],
-                'recency_boost': result['recency_boost'],
+                'cross_encoder_score': result['cross_encoder_score'],  # 0-30
+                'recency_boost': result['recency_boost'],              # 0-10
                 'rrf_k': result['rrf_k']
             }
             sources.append(source_ref)
@@ -556,20 +673,22 @@ class RRFHybridRetriever:
             # Add to content display
             content_parts.append(f"## [{i+1}] {result['entry_type']} ({result['date']})")
             
-            # Detailed RRF scoring information
+            # Detailed scoring information (two-stage approach)
             score_info = [
-                f"**RRF: {result['rrf_score']:.4f}**",
-                f"Total: {result['score']:.3f}",
-                f"Sem: {result['semantic_score']:.3f} (#{result['semantic_rank'] or 'N/A'})",
-                f"Key: {result['keyword_score']:.3f} (#{result['keyword_rank'] or 'N/A'})"
+                f"**Total: {result['score']:.1f}/40**",
+                f"CE: {result['cross_encoder_score']:.1f}/30",
+                f"Recency: {result['recency_boost']:.1f}/10",
+                f"[RRF Filter: {result['rrf_score']:.1f}/100]"
             ]
             
-            if result['cross_encoder_score'] > 0:
-                score_info.append(f"CE Relevance: +{result['cross_encoder_score']:.3f}")
-            if result['recency_boost'] > 0:
-                score_info.append(f"Recency: +{result['recency_boost']:.3f}")
+            # Add ranking details
+            rank_info = [
+                f"Sem: #{result['semantic_rank'] or 'N/A'}",
+                f"Key: #{result['keyword_rank'] or 'N/A'}"
+            ]
             
-            content_parts.append(f"*{' | '.join(score_info)} | Relevans: {relevance}%*\n")
+            content_parts.append(f"*{' | '.join(score_info)}*")
+            content_parts.append(f"*{' | '.join(rank_info)} | Relevans: {relevance}%*\n")
             
             # Optional RRF explanation
             if enable_explanation and i < 2:  # Only explain top 2 results
