@@ -474,59 +474,98 @@ If `enable_validation=True`:
 - **Fact Parsing**: JSON-based structured extraction
 
 ### Device Configuration
-The system supports flexible device selection for embedding and reranker models:
+The system supports flexible device selection for embedding and reranker models via the `core/device_manager.py` module:
 - **Auto mode** (default): Automatically selects GPU or CPU based on available memory
 - **CPU mode**: Forces CPU usage (useful when GPU is fully utilized by vLLM)
 - **GPU mode**: Forces GPU usage (requires sufficient free GPU memory)
 
 Configure via environment variables:
 ```bash
-export EMBEDDING_DEVICE_MODE=auto   # or "cpu", "cuda"
-export RERANKER_DEVICE_MODE=auto    # or "cpu", "cuda"
+export MIND_EMBEDDING_DEVICE_MODE=auto   # or "cpu", "cuda"
+export MIND_RERANKER_DEVICE_MODE=auto    # or "cpu", "cuda"
+```
+
+Or via configuration:
+```python
+from config import get_settings
+settings = get_settings()
+settings.models.embedding_device_mode = "auto"
+settings.models.reranker_device_mode = "cpu"
 ```
 
 For detailed GPU configuration and vLLM setup, see [GPU Setup Guide](docs/GPU_SETUP.md).
 
 ### Key Configuration Parameters
 
-**RRF/Hybrid Search** (`config/settings.py`):
+The system uses **Pydantic BaseSettings** for validated configuration management. Configuration can be set via:
+- Environment variables (MIND_* prefix)
+- `.env` file
+- Direct instantiation
+
+**Quick Start**:
 ```python
-EMBEDDING_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
-RERANKER_MODEL_NAME = "Qwen/Qwen3-Reranker-0.6B"
-EMBEDDING_DEVICE_MODE = 'cpu'              # or 'auto', 'cuda'
-RERANKER_DEVICE_MODE = 'cpu'               # or 'auto', 'cuda'
-INITIAL_RETRIEVAL_K = 20                   # Initial RRF candidates
-FINAL_RETRIEVAL_K = 10                     # After cross-encoder reranking
-SIMILARITY_SCORE_THRESHOLD = 0.5           # Minimum relevance threshold
-BATCH_SIZE_RERANK = 1                      # Cross-encoder batch size
+from config import get_settings
+
+settings = get_settings()
+settings.ensure_initialized()  # Create required directories
 ```
 
-**Generation** (`config/settings.py`):
+**Model Configuration** (`config/models.py`):
 ```python
-MAX_SOURCES_PER_FACT = 5                   # Max patient sources per fact
-USE_HYBRID_MULTI_FACT_APPROACH = True      # Enable fact-based generation
+# Via Python
+settings.models.embedding_model_name = "Qwen/Qwen3-Embedding-0.6B"
+settings.models.reranker_model_name = "Qwen/Qwen3-Reranker-0.6B"
+settings.models.embedding_device_mode = "cpu"  # or 'auto', 'cuda'
+settings.models.reranker_device_mode = "cpu"   # or 'auto', 'cuda'
+
+# Via environment variables
+MIND_EMBEDDING_MODEL_NAME="Qwen/Qwen3-Embedding-0.6B"
+MIND_EMBEDDING_DEVICE_MODE="auto"
 ```
 
-**Validation** (`config/settings.py`):
+**Retrieval Configuration** (`config/retrieval.py`):
 ```python
-DEFAULT_VALIDATION_CYCLES = 2              # Default per subsection
-MAX_VALIDATION_CYCLES = 3                  # Hard limit
-MIN_VALIDATION_CYCLES = 1                  # Minimum
-ENABLE_SUBSECTION_VALIDATION = True        # Can be toggled
+settings.retrieval.initial_retrieval_k = 20           # Initial RRF candidates
+settings.retrieval.final_retrieval_k = 10             # After reranking
+settings.retrieval.similarity_score_threshold = 0.5   # Minimum relevance
+settings.retrieval.batch_size_rerank = 1              # Cross-encoder batch
+settings.retrieval.max_sources_per_fact = 5           # Max patient sources
 ```
 
-**LLM Configuration** (`config/llm_config.py`):
+**Generation Configuration** (`config/generation.py`):
 ```python
-VLLM_MODE = 'server'                       # or 'local'
-TEMPERATURE = 0.2                          # Generation temperature
-TOP_P = 0.95                               # Nucleus sampling
+settings.generation.enable_multi_fact_retrieval = True  # Fact-based generation
+settings.generation.default_validation_cycles = 2       # Default per subsection
+settings.generation.max_validation_cycles = 3           # Hard limit
+settings.generation.enable_subsection_validation = True # Toggle validation
+settings.generation.temperature = 0.2                   # LLM temperature
+settings.generation.top_p = 0.95                        # Nucleus sampling
+```
+
+**vLLM Configuration** (`config/vllm.py`):
+```python
+settings.vllm.mode = "server"                # or 'local'
+settings.vllm.server_url = "http://localhost:8000"
+settings.vllm.model_name = "Qwen/Qwen3-30B"
 ```
 
 **Reference Settings** (`config/reference_settings.py`):
-- `none`: No references
-- `minimal`: 1 reference per section
-- `balanced`: 3 references per section (default)
-- `detailed`: 5 references per section
+```python
+# Use presets
+from config import apply_preset
+apply_preset("balanced")  # none, minimal, balanced, detailed
+
+# Or configure manually
+settings.reference.include_references = True
+settings.reference.max_references_per_section = 3
+```
+
+**Path Configuration** (`config/paths.py`):
+```python
+settings.paths.guideline_dir = Path("data/Retningslinjer")
+settings.paths.patient_record_dir = Path("data/Journalnotater")
+settings.paths.generated_docs_dir = Path("generated_documents")
+```
 
 ### Quality Assurance
 - **Two-stage validation**:
@@ -546,30 +585,57 @@ TOP_P = 0.95                               # Nucleus sampling
 ```
 MIND/
 ├── generate_document_direct.py      # Entry point
-├── core/
+├── core/                            # System fundamentals
 │   ├── database.py                  # Vector DB management
 │   ├── memory.py                    # Session memory
 │   ├── embeddings.py                # Embedding functions
-│   └── reranker.py                  # Cross-encoder reranker
-├── generation/
+│   ├── reranker.py                  # Cross-encoder reranker
+│   ├── device_manager.py            # GPU/CPU device selection
+│   ├── types.py                     # Type definitions
+│   └── exceptions.py                # Core exceptions
+├── generation/                      # Document generation pipeline
 │   ├── document_generator.py        # Main document orchestration
 │   ├── section_generator.py         # Section/subsection generation
 │   ├── fact_parser.py               # Guideline fact extraction
 │   ├── fact_based_generator.py      # Fact answering & assembly
-│   └── fact_validator.py            # Two-stage validation
-├── tools/
+│   ├── fact_validator.py            # Two-stage validation
+│   ├── models.py                    # Data classes for generation
+│   ├── constants.py                 # Generation constants
+│   └── exceptions.py                # Generation exceptions
+├── tools/                           # Retrieval utilities
 │   ├── guideline_tools.py           # Guideline retrieval
 │   ├── patient_tools.py             # Patient EHR retrieval (RRF)
-│   └── hybrid_search.py             # Two-stage RRF hybrid search
-├── utils/
+│   ├── hybrid_search.py             # Two-stage RRF hybrid search
+│   ├── base_retriever.py            # Base retriever interface
+│   ├── rrf_algorithm.py             # RRF fusion algorithm
+│   ├── tokenizer.py                 # Danish medical tokenization
+│   ├── scoring.py                   # Score normalization utilities
+│   ├── constants.py                 # Retrieval constants
+│   └── exceptions.py                # Retrieval exceptions
+├── utils/                           # Supporting utilities
 │   ├── pdf_utils.py                 # PDF generation & formatting
+│   ├── pdf_styles.py                # PDF styling configuration
 │   ├── text_processing.py           # Text parsing & assembly
+│   ├── text_patterns.py             # Regex patterns for parsing
 │   ├── validation_report_logger.py  # Validation reporting
-│   └── error_handling.py            # Retry & error handling
-├── config/
-│   ├── settings.py                  # Configuration
-│   ├── llm_config.py                # LLM settings
-│   └── reference_settings.py        # Reference presets
+│   ├── error_handling.py            # Retry & error handling
+│   ├── profiling.py                 # Performance profiling
+│   ├── token_tracker.py             # Token usage tracking
+│   └── exceptions.py                # Utility exceptions
+├── config/                          # Configuration management (Pydantic)
+│   ├── settings.py                  # Main settings aggregator
+│   ├── paths.py                     # Path configuration
+│   ├── models.py                    # Model configuration
+│   ├── retrieval.py                 # Retrieval configuration
+│   ├── generation.py                # Generation configuration
+│   ├── vllm.py                      # vLLM configuration
+│   ├── llm_config.py                # LLM client management
+│   ├── reference_settings.py        # Reference presets
+│   └── exceptions.py                # Configuration exceptions
+├── agents/                          # Agent framework
+│   ├── base_agent.py                # Base agent interface
+│   ├── retrieval_agent.py           # Retrieval agent
+│   └── exceptions.py                # Agent exceptions
 ├── databases/
 │   ├── guidelines_db/               # Guideline vector DB
 │   ├── patient_db/                  # Patient EHR vector DB
