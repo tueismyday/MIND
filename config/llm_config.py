@@ -4,8 +4,11 @@ Manages the setup and configuration of different LLM instances using vLLM.
 """
 from openai import OpenAI
 from .settings import (
-    GENERATION_TEMPERATURE,
-    CRITIQUE_TEMPERATURE,
+    TEMPERATURE,
+    TOP_P,
+    TOP_K,
+    MIN_P,
+    PRESENCE_PENALTY,
     VLLM_MODE,
     VLLM_SERVER_URL,
     VLLM_MODEL_NAME,
@@ -17,9 +20,9 @@ from .settings import (
 class VLLMClient:
     """vLLM client wrapper compatible with your existing interface."""
 
-    def __init__(self, model_name, temperature=0.7, base_url="http://localhost:8000"):
+    def __init__(self, model_name, temperature=None, base_url="http://localhost:8000"):
         self.model_name = model_name
-        self.temperature = temperature
+        self.temperature = temperature if temperature is not None else TEMPERATURE
         self.base_url = base_url.rstrip('/')
         self.last_usage = None  # Store token usage from last invocation
 
@@ -32,6 +35,10 @@ class VLLMClient:
         """
         Invoke method to maintain compatibility with langchain interface.
         Captures token usage information for tracking purposes.
+        Uses hard defaults from settings.py for generation parameters.
+        
+        Note: Server mode (OpenAI API) only supports: temperature, top_p, presence_penalty, frequency_penalty
+        top_k and min_p are NOT supported in server mode (only in local mode).
         """
         try:
             response = self.client.chat.completions.create(
@@ -39,7 +46,8 @@ class VLLMClient:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=kwargs.get('temperature', self.temperature),
                 max_tokens=kwargs.get('max_tokens', 6056),
-                top_p=kwargs.get('top_p', 0.9),
+                top_p=kwargs.get('top_p', TOP_P),
+                presence_penalty=kwargs.get('presence_penalty', PRESENCE_PENALTY),
             )
 
             # Capture token usage information if available
@@ -73,7 +81,7 @@ class VLLMClient:
 class InPythonVLLMClient:
     """vLLM client for in-process model loading (local mode)."""
 
-    def __init__(self, model_name, temperature=0.7,
+    def __init__(self, model_name, temperature=None,
                  gpu_memory_utilization=0.75,
                  max_model_len=14000,
                  max_num_seqs=1):
@@ -82,7 +90,7 @@ class InPythonVLLMClient:
 
         Args:
             model_name: HuggingFace model name
-            temperature: Default sampling temperature
+            temperature: Default sampling temperature (uses TEMPERATURE from settings if None)
             gpu_memory_utilization: GPU memory fraction for model (0.0-1.0)
             max_model_len: Maximum context length
             max_num_seqs: Maximum number of sequences to process in parallel
@@ -95,7 +103,7 @@ class InPythonVLLMClient:
             )
 
         self.model_name = model_name
-        self.temperature = temperature
+        self.temperature = temperature if temperature is not None else TEMPERATURE
         self.last_usage = None
         self.SamplingParams = SamplingParams
 
@@ -120,13 +128,20 @@ class InPythonVLLMClient:
         """
         Invoke method to maintain compatibility with langchain interface.
         Captures token usage information for tracking purposes.
+        Uses hard defaults from settings.py for all generation parameters.
+        
+        Note: Local mode (vLLM native API) supports ALL parameters including:
+        temperature, top_p, top_k, min_p, presence_penalty
         """
         try:
-            # Create sampling parameters
+            # Create sampling parameters with all generation settings
             sampling_params = self.SamplingParams(
                 temperature=kwargs.get('temperature', self.temperature),
                 max_tokens=kwargs.get('max_tokens', 6056),
-                top_p=kwargs.get('top_p', 0.9),
+                top_p=kwargs.get('top_p', TOP_P),
+                top_k=kwargs.get('top_k', TOP_K),
+                min_p=kwargs.get('min_p', MIN_P),
+                presence_penalty=kwargs.get('presence_penalty', PRESENCE_PENALTY),
             )
 
             # Generate response
@@ -184,10 +199,6 @@ class LLMConfig:
             max_model_len: Max context length for local mode (defaults to VLLM_MAX_MODEL_LEN)
             max_num_seqs: Max parallel sequences for local mode (defaults to VLLM_MAX_NUM_SEQS)
         """
-        ### POSSIBLE MODELS ###
-        #leon-se/gemma-3-27b-it-qat-W4A16-G128
-        #cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit
-        #openai/gpt-oss-20b
 
         # Use provided values or fall back to settings
         self.mode = mode if mode is not None else VLLM_MODE
@@ -234,21 +245,21 @@ class LLMConfig:
     def llm_retrieve(self):
         """Get the retrieval LLM instance (server or local based on mode)."""
         if self._llm_retrieve is None:
-            self._llm_retrieve = self._create_client(GENERATION_TEMPERATURE)
+            self._llm_retrieve = self._create_client(TEMPERATURE)
         return self._llm_retrieve
 
     @property
     def llm_generate(self):
         """Get the generation LLM instance (server or local based on mode)."""
         if self._llm_generate is None:
-            self._llm_generate = self._create_client(GENERATION_TEMPERATURE)
+            self._llm_generate = self._create_client(TEMPERATURE)
         return self._llm_generate
 
     @property
     def llm_critique(self):
         """Get the critique LLM instance (server or local based on mode)."""
         if self._llm_critique is None:
-            self._llm_critique = self._create_client(CRITIQUE_TEMPERATURE)
+            self._llm_critique = self._create_client(TEMPERATURE)
         return self._llm_critique
 
 # Global LLM configuration instance
