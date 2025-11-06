@@ -35,8 +35,89 @@ RERANKER_MODEL_NAME = "Qwen/Qwen3-Reranker-0.6B"
 
 # Device selection mode for each model
 # Options: "auto" (automatic device selection with GPU memory check), "cpu" (force CPU), "cuda" (force GPU)
-EMBEDDING_DEVICE_MODE = os.environ.get('EMBEDDING_DEVICE_MODE', 'auto').lower()
-RERANKER_DEVICE_MODE = os.environ.get('RERANKER_DEVICE_MODE', 'auto').lower()
+EMBEDDING_DEVICE_MODE = os.environ.get('EMBEDDING_DEVICE_MODE', 'cpu').lower() ######
+RERANKER_DEVICE_MODE = os.environ.get('RERANKER_DEVICE_MODE', 'cpu').lower() ######
+
+# Agent configuration
+MAX_AGENT_ITERATIONS = 10
+AGENT_EARLY_STOPPING_METHOD = "generate"
+MEMORY_MAX_TOKEN_LIMIT = 12000
+CHAT_HISTORY_LIMIT = 20
+
+# Retrieval configuration
+INITIAL_RETRIEVAL_K = 20
+FINAL_RETRIEVAL_K = 10
+SIMILARITY_SCORE_THRESHOLD = 0.5
+# cross-encoder reranker batchsize
+BATCH_SIZE_RERANK = 1
+
+GUIDELINE_SEARCH_K = 5
+GENERATED_DOC_SEARCH_K = 5
+
+# Generation configuration
+# These parameters apply to all model calls (retrieve, generate, critique)
+# 
+# IMPORTANT - Parameter Compatibility:
+# - Server mode (VLLM_MODE="server"): Supports temperature, top_p, presence_penalty
+# - Local mode (VLLM_MODE="local"): Supports ALL parameters below
+# 
+# If using server mode, top_k and min_p will be ignored (OpenAI API limitation)
+TEMPERATURE = 0.2           # Controls randomness (0.0 = deterministic, 1.0 = very random)
+TOP_P = 0.95               # Nucleus sampling - cumulative probability cutoff
+TOP_K = 20                 # Top-k sampling - limits to top k tokens (LOCAL MODE ONLY)
+MIN_P = 0                  # Minimum probability threshold (LOCAL MODE ONLY, 0 = disabled)
+PRESENCE_PENALTY = 1.5     # Penalizes token repetition (0.0 = no penalty, 2.0 = max penalty)
+
+# vLLM configuration
+# Mode: "server" (localhost API) or "local" (in-Python instance)
+VLLM_MODE = os.environ.get('VLLM_MODE', 'server')  # "server" or "local"
+VLLM_SERVER_URL = os.environ.get('VLLM_SERVER_URL', 'http://localhost:8000')
+VLLM_MODEL_NAME = os.environ.get('VLLM_MODEL_NAME', 'cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit') #############################################################
+
+# leon-se/gemma-3-27b-it-qat-W4A16-G128
+# cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit
+# openai/gpt-oss-20b
+
+# vLLM local mode configuration (only used when VLLM_MODE="local")
+VLLM_GPU_MEMORY_UTILIZATION = float(os.environ.get('VLLM_GPU_MEMORY_UTILIZATION', '0.90'))
+VLLM_MAX_MODEL_LEN = int(os.environ.get('VLLM_MAX_MODEL_LEN', '14000'))
+VLLM_MAX_NUM_SEQS = int(os.environ.get('VLLM_MAX_NUM_SEQS', '1'))
+
+# Validation configuration
+DEFAULT_VALIDATION_CYCLES = 2  # Default number of validation/revision cycles per subsection
+MAX_VALIDATION_CYCLES = 3      # Maximum allowed validation cycles
+MIN_VALIDATION_CYCLES = 1      # Minimum validation cycles (at least one critique cycle)
+
+# Hybrid approach configuration
+USE_HYBRID_MULTI_FACT_APPROACH = True  # Enable multi-fact retrieval
+MAX_SOURCES_PER_FACT = 5  # Max sources to retrieve per individual fact
+
+# PDF configuration
+PDF_FONT_PATH = "DejaVuSans.ttf"
+DEFAULT_OUTPUT_NAME = "generated_medical_document.pdf"
+
+# Default patient file (if available)
+DEFAULT_PATIENT_FILE = PATIENT_RECORD_DIR / "Patient_journal_Geriatrisk_patient.pdf"
+
+# Date parsing formats for patient records
+DATE_FORMATS = ["%y.%m.%d %H:%M", "%y.%m.%d"]
+
+def ensure_directories():
+    """Create all necessary directories if they don't exist."""
+    directories = [
+        DATA_DIR, GUIDELINE_DIR, PATIENT_RECORD_DIR, GENERATED_DOCS_DIR,
+        GUIDELINE_DB_DIR, PATIENT_DB_DIR, GENERATED_DOCS_DB_DIR, CACHE_DIR
+    ]
+    
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+        
+def get_patient_file_path():
+    """Get the path to the patient file if it exists."""
+    if DEFAULT_PATIENT_FILE.exists():
+        return str(DEFAULT_PATIENT_FILE)
+    return None
+
 
 def get_device_config():
     """
@@ -125,24 +206,24 @@ def get_device_config():
         print(f"[GPU MEMORY] {gpu_info}")
 
         # Memory requirements:
-        # - Embedding model (Qwen3-Embedding-0.6B): ~1.2GB
-        # - Reranker model (Qwen3-Reranker-0.6B): ~1.2GB
+        # - Embedding model (Qwen3-Embedding-0.6B): ~2.2GB
+        # - Reranker model (Qwen3-Reranker-0.6B): ~2.2GB
         # - Safety buffer: ~0.5GB
-        # Total needed: ~3GB free
+        # Total needed: ~5GB free
 
-        MIN_FREE_MEMORY_GB = 2.5  # Minimum free memory to attempt GPU usage
+        MIN_FREE_MEMORY_GB = 4.5  # Minimum free memory to attempt GPU usage
 
         auto_device = None
         if free_memory >= MIN_FREE_MEMORY_GB:
-            print(f"[GPU MEMORY] ✓ Sufficient free memory ({free_memory:.2f}GB ≥ {MIN_FREE_MEMORY_GB}GB)")
-            print(f"[GPU MEMORY] ✓ Auto mode will use GPU")
+            print(f"[GPU MEMORY] Sufficient free memory ({free_memory:.2f}GB â‰¥ {MIN_FREE_MEMORY_GB}GB)")
+            print(f"[GPU MEMORY] Auto mode will use GPU")
             auto_device = "cuda"
         else:
-            print(f"[GPU MEMORY] ✗ Insufficient free memory ({free_memory:.2f}GB < {MIN_FREE_MEMORY_GB}GB)")
-            print(f"[GPU MEMORY] → Auto mode will use CPU")
+            print(f"[GPU MEMORY] Insufficient free memory ({free_memory:.2f}GB < {MIN_FREE_MEMORY_GB}GB)")
+            print(f"[GPU MEMORY] Auto mode will use CPU")
             if used_memory > 5.0:
-                print(f"[GPU MEMORY] → vLLM using {used_memory:.2f}GB")
-                print(f"[GPU MEMORY] → Consider lowering vLLM --gpu-memory-utilization to 0.70-0.75")
+                print(f"[GPU MEMORY] vLLM using {used_memory:.2f}GB")
+                print(f"[GPU MEMORY] Consider lowering vLLM --gpu-memory-utilization to 0.70-0.75")
             auto_device = "cpu"
 
         # Apply auto device to models in auto mode
@@ -172,70 +253,3 @@ def get_device_config():
 EMBEDDING_DEVICE, RERANKER_DEVICE, DEVICE_INFO = get_device_config()
 print(f"[DEVICE CONFIG] Embedding: {EMBEDDING_DEVICE}, Reranker: {RERANKER_DEVICE}")
 print(f"[DEVICE INFO] {DEVICE_INFO}")
-
-# Agent configuration
-MAX_AGENT_ITERATIONS = 10
-AGENT_EARLY_STOPPING_METHOD = "generate"
-MEMORY_MAX_TOKEN_LIMIT = 12000
-CHAT_HISTORY_LIMIT = 20
-
-# Retrieval configuration
-INITIAL_RETRIEVAL_K = 20
-FINAL_RETRIEVAL_K = 10
-SIMILARITY_SCORE_THRESHOLD = 0.5
-
-# Tool-specific search k values
-GUIDELINE_SEARCH_K = 5  # k value for guideline searches in tools
-GENERATED_DOC_SEARCH_K = 5  # k value for generated document searches in tools
-PATIENT_SEARCH_K = 5  # k value for patient record searches in tools
-
-# Generation configuration
-GENERATION_TEMPERATURE = 0.2
-CRITIQUE_TEMPERATURE = 0.1
-
-# vLLM configuration
-# Mode: "server" (localhost API) or "local" (in-Python instance)
-VLLM_MODE = os.environ.get('VLLM_MODE', 'server')  # "server" or "local"
-VLLM_SERVER_URL = os.environ.get('VLLM_SERVER_URL', 'http://localhost:8000')
-VLLM_MODEL_NAME = os.environ.get('VLLM_MODEL_NAME', 'cpatonn/Qwen3-30B-A3B-Instruct-2507-AWQ-4bit')
-
-# vLLM local mode configuration (only used when VLLM_MODE="local")
-VLLM_GPU_MEMORY_UTILIZATION = float(os.environ.get('VLLM_GPU_MEMORY_UTILIZATION', '0.75'))
-VLLM_MAX_MODEL_LEN = int(os.environ.get('VLLM_MAX_MODEL_LEN', '14000'))
-VLLM_MAX_NUM_SEQS = int(os.environ.get('VLLM_MAX_NUM_SEQS', '1'))
-
-# Validation configuration
-DEFAULT_VALIDATION_CYCLES = 2  # Default number of validation/revision cycles per subsection
-MAX_VALIDATION_CYCLES = 3      # Maximum allowed validation cycles
-MIN_VALIDATION_CYCLES = 1      # Minimum validation cycles (at least one critique cycle)
-
-# Hybrid approach configuration
-USE_HYBRID_MULTI_FACT_APPROACH = True  # Enable multi-fact retrieval
-FACT_COMPLEXITY_THRESHOLD = 4  # Subsections with >4 facts use multi-fact retrieval
-MAX_SOURCES_PER_FACT = 2  # Max sources to retrieve per individual fact
-
-# PDF configuration
-PDF_FONT_PATH = "DejaVuSans.ttf"
-DEFAULT_OUTPUT_NAME = "generated_medical_document.pdf"
-
-# Default patient file (if available)
-DEFAULT_PATIENT_FILE = PATIENT_RECORD_DIR / "Patient_journal_Geriatrisk_patient.pdf"
-
-# Date parsing formats for patient records
-DATE_FORMATS = ["%y.%m.%d %H:%M", "%y.%m.%d"]
-
-def ensure_directories():
-    """Create all necessary directories if they don't exist."""
-    directories = [
-        DATA_DIR, GUIDELINE_DIR, PATIENT_RECORD_DIR, GENERATED_DOCS_DIR,
-        GUIDELINE_DB_DIR, PATIENT_DB_DIR, GENERATED_DOCS_DB_DIR, CACHE_DIR
-    ]
-    
-    for directory in directories:
-        directory.mkdir(parents=True, exist_ok=True)
-        
-def get_patient_file_path():
-    """Get the path to the patient file if it exists."""
-    if DEFAULT_PATIENT_FILE.exists():
-        return str(DEFAULT_PATIENT_FILE)
-    return None
